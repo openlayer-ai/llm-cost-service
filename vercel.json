@@ -1,0 +1,23 @@
+{
+  "builds": [
+    {
+      "src": "app/main.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "app/main.py"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/v1/costs/refresh",
+      "schedule": "0 0 * * *"
+    }
+  ],
+  "env": {
+    "ENABLE_SCHEDULER": "false"
+  }
+}
