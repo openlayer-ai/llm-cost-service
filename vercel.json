@@ -2,7 +2,10 @@
   "builds": [
     {
       "src": "app/main.py",
-      "use": "@vercel/python"
+      "use": "@vercel/python",
+      "config": {
+        "maxDuration": 60
+      }
     }
   ],
   "routes": [
@@ -19,10 +22,5 @@
   ],
   "env": {
     "ENABLE_SCHEDULER": "false"
-  },
-  "functions": {
-    "app/main.py": {
-      "maxDuration": 60
-    }
   }
 }
