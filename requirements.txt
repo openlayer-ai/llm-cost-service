@@ -1,0 +1,8 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+sqlalchemy[asyncio]>=2.0
+asyncpg>=0.29
+alembic>=1.13
+pydantic-settings>=2.1
+apscheduler>=3.10
+litellm>=1.0

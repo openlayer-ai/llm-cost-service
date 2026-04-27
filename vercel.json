@@ -19,5 +19,10 @@
   ],
   "env": {
     "ENABLE_SCHEDULER": "false"
+  },
+  "functions": {
+    "app/main.py": {
+      "maxDuration": 60
+    }
   }
 }
