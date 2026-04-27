@@ -96,6 +96,51 @@ class TestRefreshCosts:
         resp = await client.get("/v1/costs/openai/gpt-4o")
         assert resp.status_code == 200
 
+    async def test_returns_401_when_cron_secret_set_and_header_missing(self, client, monkeypatch):
+        monkeypatch.setenv("CRON_SECRET", "test-secret")
+        from app import config as config_mod
+        config_mod.get_settings.cache_clear()
+        resp = await client.post("/v1/costs/refresh")
+        assert resp.status_code == 401
+        config_mod.get_settings.cache_clear()
+
+    async def test_returns_401_when_cron_secret_set_and_header_wrong(self, client, monkeypatch):
+        monkeypatch.setenv("CRON_SECRET", "test-secret")
+        from app import config as config_mod
+        config_mod.get_settings.cache_clear()
+        resp = await client.post("/v1/costs/refresh", headers={"Authorization": "Bearer wrong"})
+        assert resp.status_code == 401
+        config_mod.get_settings.cache_clear()
+
+    async def test_returns_200_when_cron_secret_set_and_header_correct(self, client, monkeypatch):
+        monkeypatch.setenv("CRON_SECRET", "test-secret")
+        from app import config as config_mod
+        config_mod.get_settings.cache_clear()
+        with patch("app.api.costs.LiteLLMCostProvider") as MockProvider:
+            MockProvider.return_value.fetch_costs.return_value = []
+            resp = await client.post("/v1/costs/refresh", headers={"Authorization": "Bearer test-secret"})
+        assert resp.status_code == 200
+        config_mod.get_settings.cache_clear()
+
+
+class TestGetStatus:
+    async def test_returns_zero_counts_when_table_empty(self, client):
+        resp = await client.get("/v1/costs/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_models"] == 0
+        assert data["total_providers"] == 0
+        assert data["last_refreshed_at"] is None
+
+    async def test_returns_counts_after_upsert(self, client, session, openai_entity, anthropic_entity):
+        from app.costs.repositories import LlmCostRepository
+        await LlmCostRepository(session).upsert_all([openai_entity, anthropic_entity])
+        resp = await client.get("/v1/costs/status")
+        data = resp.json()
+        assert data["total_models"] == 2
+        assert data["total_providers"] == 2
+        assert data["last_refreshed_at"] is not None
+
 
 class TestHealth:
     async def test_returns_ok(self, client):

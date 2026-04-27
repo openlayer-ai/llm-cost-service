@@ -68,6 +68,32 @@ class TestListAll:
         assert result == []
 
 
+class TestGetStatus:
+    async def test_returns_zero_counts_when_table_empty(self, repository):
+        status = await repository.get_status()
+        assert status["total_models"] == 0
+        assert status["total_providers"] == 0
+        assert status["last_refreshed_at"] is None
+
+    async def test_counts_models_and_providers(self, repository, openai_entity, anthropic_entity):
+        await repository.upsert_all([openai_entity, anthropic_entity])
+        status = await repository.get_status()
+        assert status["total_models"] == 2
+        assert status["total_providers"] == 2
+
+    async def test_counts_multiple_models_per_provider_correctly(self, repository, openai_entity):
+        second = LlmCostEntity("openai", "gpt-4o-mini", 1.5e-7, 6e-7, "litellm")
+        await repository.upsert_all([openai_entity, second])
+        status = await repository.get_status()
+        assert status["total_models"] == 2
+        assert status["total_providers"] == 1
+
+    async def test_last_refreshed_at_is_set_after_upsert(self, repository, openai_entity):
+        await repository.upsert_all([openai_entity])
+        status = await repository.get_status()
+        assert status["last_refreshed_at"] is not None
+
+
 class TestUpsertAll:
     async def test_inserts_new_rows(self, repository, openai_entity):
         await repository.upsert_all([openai_entity])

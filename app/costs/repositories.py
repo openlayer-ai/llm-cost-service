@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import distinct, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -62,6 +62,21 @@ class LlmCostRepository:
         result = await self.session.execute(stmt)
         await self.session.commit()
         return result.rowcount
+
+    async def get_status(self) -> dict:
+        result = await self.session.execute(
+            select(
+                func.count().label("total_models"),
+                func.count(distinct(LlmCost.provider)).label("total_providers"),
+                func.max(LlmCost.updated_at).label("last_refreshed_at"),
+            )
+        )
+        row = result.one()
+        return {
+            "total_models": row.total_models,
+            "total_providers": row.total_providers,
+            "last_refreshed_at": row.last_refreshed_at,
+        }
 
     @staticmethod
     def _to_entity(row: LlmCost) -> LlmCostEntity:

@@ -21,3 +21,9 @@ class ListCostsResponse(BaseModel):
 class RefreshResponse(BaseModel):
     rows_affected: int
     duration_ms: float
+
+
+class StatusResponse(BaseModel):
+    total_models: int
+    total_providers: int
+    last_refreshed_at: datetime | None

@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     database_url: str
     enable_scheduler: bool = True
     scheduler_interval_hours: int = 24
+    cron_secret: str | None = (
+        None  # CRON_SECRET — required to call POST /v1/costs/refresh when set
+    )
 
     @field_validator("database_url", mode="after")
     @classmethod
@@ -24,7 +27,7 @@ class Settings(BaseSettings):
         params = parse_qs(parsed.query, keep_blank_values=True)
 
         params.pop("channel_binding", None)  # not supported by asyncpg
-        params.pop("sslmode", None)          # asyncpg uses ssl=, not sslmode=
+        params.pop("sslmode", None)  # asyncpg uses ssl=, not sslmode=
         params.setdefault("ssl", ["require"])
 
         new_query = urlencode({k: vs[0] for k, vs in params.items()})
