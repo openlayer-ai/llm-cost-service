@@ -5,5 +5,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def get_db_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
-    async with request.app.state.db_session_factory() as session:
+    # Use session factory set by the lifespan when available (Docker).
+    # On Vercel the lifespan may not run, so we initialize lazily on first request.
+    factory = getattr(request.app.state, "db_session_factory", None)
+    if factory is None:
+        from app.config import get_settings
+        from app.database import create_engine, create_session_factory
+
+        engine = create_engine(get_settings().database_url)
+        factory = create_session_factory(engine)
+        request.app.state.db_session_factory = factory
+
+    async with factory() as session:
         yield session
