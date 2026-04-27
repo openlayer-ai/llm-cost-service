@@ -28,3 +28,5 @@ htmlcov/
 
 # Docker
 *.override.yml
+.vercel
+.env*.local
