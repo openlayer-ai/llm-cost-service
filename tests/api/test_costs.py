@@ -78,21 +78,21 @@ class TestRefreshCosts:
         ]
         with patch("app.api.costs.LiteLLMCostProvider") as MockProvider:
             MockProvider.return_value.fetch_costs.return_value = fake_costs
-            resp = await client.post("/v1/costs/refresh")
+            resp = await client.get("/v1/costs/refresh")
         assert resp.status_code == 200
         assert resp.json()["rows_affected"] == 2
 
     async def test_returns_duration_ms(self, client):
         with patch("app.api.costs.LiteLLMCostProvider") as MockProvider:
             MockProvider.return_value.fetch_costs.return_value = []
-            resp = await client.post("/v1/costs/refresh")
+            resp = await client.get("/v1/costs/refresh")
         assert resp.json()["duration_ms"] >= 0
 
     async def test_costs_are_queryable_after_refresh(self, client):
         fake_costs = [LlmCostEntity("openai", "gpt-4o", 2.5e-6, 10e-6, "litellm")]
         with patch("app.api.costs.LiteLLMCostProvider") as MockProvider:
             MockProvider.return_value.fetch_costs.return_value = fake_costs
-            await client.post("/v1/costs/refresh")
+            await client.get("/v1/costs/refresh")
         resp = await client.get("/v1/costs/openai/gpt-4o")
         assert resp.status_code == 200
 
@@ -100,7 +100,7 @@ class TestRefreshCosts:
         monkeypatch.setenv("CRON_SECRET", "test-secret")
         from app import config as config_mod
         config_mod.get_settings.cache_clear()
-        resp = await client.post("/v1/costs/refresh")
+        resp = await client.get("/v1/costs/refresh")
         assert resp.status_code == 401
         config_mod.get_settings.cache_clear()
 
@@ -108,7 +108,7 @@ class TestRefreshCosts:
         monkeypatch.setenv("CRON_SECRET", "test-secret")
         from app import config as config_mod
         config_mod.get_settings.cache_clear()
-        resp = await client.post("/v1/costs/refresh", headers={"Authorization": "Bearer wrong"})
+        resp = await client.get("/v1/costs/refresh", headers={"Authorization": "Bearer wrong"})
         assert resp.status_code == 401
         config_mod.get_settings.cache_clear()
 
@@ -118,7 +118,7 @@ class TestRefreshCosts:
         config_mod.get_settings.cache_clear()
         with patch("app.api.costs.LiteLLMCostProvider") as MockProvider:
             MockProvider.return_value.fetch_costs.return_value = []
-            resp = await client.post("/v1/costs/refresh", headers={"Authorization": "Bearer test-secret"})
+            resp = await client.get("/v1/costs/refresh", headers={"Authorization": "Bearer test-secret"})
         assert resp.status_code == 200
         config_mod.get_settings.cache_clear()
 

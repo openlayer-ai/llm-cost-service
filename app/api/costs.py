@@ -67,7 +67,7 @@ async def get_cost(
     return _to_schema(result.cost)
 
 
-@router.post("/refresh", response_model=RefreshResponse)
+@router.get("/refresh", response_model=RefreshResponse)
 async def refresh_costs(
     authorization: str | None = Header(None),
     session: AsyncSession = Depends(get_db_session),
