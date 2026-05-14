@@ -1,22 +1,22 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
-from app.costs.entities import LlmCostEntity
-from app.costs.providers import LiteLLMCostProvider
-from app.costs.repositories import LlmCostRepository
-from app.costs.schemas import (
+from service.config import get_settings
+from service.costs.entities import LlmCostEntity
+from service.costs.providers import LiteLLMCostProvider
+from service.costs.repositories import LlmCostRepository
+from service.costs.schemas import (
     ListCostsResponse,
     LlmCostSchema,
     RefreshResponse,
     StatusResponse,
 )
-from app.costs.services import (
+from service.costs.services import (
     GetLlmCostService,
     ListLlmCostsService,
     RefreshLlmCostsService,
 )
-from app.deps import get_db_session
+from service.deps import get_db_session
 
 router = APIRouter(prefix="/v1/costs", tags=["costs"])
 

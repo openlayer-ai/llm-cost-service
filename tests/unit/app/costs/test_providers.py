@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from app.costs.entities import LlmCostEntity
-from app.costs.providers import LiteLLMCostProvider
+from service.costs.entities import LlmCostEntity
+from service.costs.providers import LiteLLMCostProvider
 
 
 def _entry(**kwargs) -> dict:

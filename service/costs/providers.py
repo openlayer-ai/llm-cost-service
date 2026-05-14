@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from app.costs.entities import LlmCostEntity
+from service.costs.entities import LlmCostEntity
 
 
 class CostDataProvider(Protocol):
@@ -16,11 +16,19 @@ class LiteLLMCostProvider:
     that is read at import time. Imported lazily to avoid startup overhead.
     """
 
+    # LiteLLM's data file includes a `sample_spec` placeholder entry whose
+    # provider is a docs URL — it documents the schema rather than a real
+    # model. Drop it so it doesn't pollute the table.
+    _SKIP_MODELS = frozenset({"sample_spec"})
+
     def fetch_costs(self) -> list[LlmCostEntity]:
         import litellm  # noqa: PLC0415
 
         costs = []
         for model_key, entry in litellm.model_cost.items():
+            if model_key in self._SKIP_MODELS:
+                continue
+
             input_cost = entry.get("input_cost_per_token")
             output_cost = entry.get("output_cost_per_token")
             provider = entry.get("litellm_provider")

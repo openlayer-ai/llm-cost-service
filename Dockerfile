@@ -14,10 +14,10 @@ WORKDIR /app
 COPY --from=builder /app/.venv .venv
 COPY alembic.ini .
 COPY alembic/ alembic/
-COPY app/ app/
+COPY service/ service/
 
 ENV PATH="/app/.venv/bin:$PATH"
 USER appuser
 
 EXPOSE 8080
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "service.main:app", "--host", "0.0.0.0", "--port", "8080"]

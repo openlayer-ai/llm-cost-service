@@ -4,9 +4,13 @@ services:
     ports:
       - "8081:8080"
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/llm_costs
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/llm_costs?ssl=disable
       ENABLE_SCHEDULER: "true"
       SCHEDULER_INTERVAL_HOURS: "24"
+    # Live-reload: source mounted over the image's /app/service, uvicorn watches Python.
+    volumes:
+      - ./service:/app/service
+    command: ["uvicorn", "service.main:app", "--host", "0.0.0.0", "--port", "8080", "--reload", "--reload-dir", "/app/service"]
     depends_on:
       db:
         condition: service_healthy

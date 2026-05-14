@@ -30,3 +30,6 @@ htmlcov/
 *.override.yml
 .vercel
 .env*.local
+
+# Claude
+.claude/

@@ -9,8 +9,8 @@ async def get_db_session(request: Request) -> AsyncGenerator[AsyncSession, None]
     # On Vercel the lifespan may not run, so we initialize lazily on first request.
     factory = getattr(request.app.state, "db_session_factory", None)
     if factory is None:
-        from app.config import get_settings
-        from app.database import create_engine, create_session_factory
+        from service.config import get_settings
+        from service.database import create_engine, create_session_factory
 
         engine = create_engine(get_settings().database_url)
         factory = create_session_factory(engine)
