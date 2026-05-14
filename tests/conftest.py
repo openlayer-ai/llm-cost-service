@@ -5,15 +5,15 @@ from __future__ import annotations
 import os
 from datetime import datetime, timezone
 
-# Must be set before app.config is imported anywhere in this process.
+# Must be set before service.config is imported anywhere in this process.
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.costs.entities import LlmCostEntity
-from app.costs.models import Base
+from service.costs.entities import LlmCostEntity
+from service.costs.models import Base
 
 _DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 

@@ -4,7 +4,7 @@ from logging.config import fileConfig
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic import context
-from app.costs.models import Base
+from service.costs.models import Base
 
 config = context.config
 if config.config_file_name is not None:
@@ -14,7 +14,7 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
-    from app.config import get_settings
+    from service.config import get_settings
 
     return get_settings().database_url
 

@@ -8,9 +8,9 @@ from typing import cast
 import pytest
 from fastapi import HTTPException
 
-from app.costs.entities import LlmCostEntity
-from app.costs.repositories import LlmCostRepository
-from app.costs.services import GetLlmCostService, ListLlmCostsService, RefreshLlmCostsService
+from service.costs.entities import LlmCostEntity
+from service.costs.repositories import LlmCostRepository
+from service.costs.services import GetLlmCostService, ListLlmCostsService, RefreshLlmCostsService
 
 _NOW = datetime.now(timezone.utc)
 

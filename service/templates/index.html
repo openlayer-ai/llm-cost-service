@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..800&family=Geist+Mono:wght@400..600&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect width='180' height='180' rx='32' fill='%23592FEA'/><path d='M56 22V56H118.84C121.69 56 124 58.32 124 61.16V124H158V62.8L117.2 22H56Z' fill='white'/><path d='M56.01 118.84L56 56H22L22.01 84.87C22.01 125.25 55.95 158 96.34 158H124V124H61.16C58.31 124 56 121.69 56 118.84H56.01Z' fill='white'/></svg>">
+<title>Openlayer LLM Costs</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --brand: #592FEA;
+    --brand-tint-soft: #fafaff;
+    --fg: #0a0a0a;
+    --fg-muted: #888;
+    --border: #ebebeb;
+    --bg: #ffffff;
+    --bg-soft: #f8f8f8;
+    --success: #1f9d55;
+  }
+  html { font-family: 'Geist', system-ui, -apple-system, sans-serif; }
+  body { background: var(--bg); color: var(--fg); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+  code, .mono { font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  a { color: var(--brand); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .hidden { display: none !important; }
+
+  /* Header */
+  .header { background: #fff; border-bottom: 1px solid var(--border); padding: 20px 0; position: sticky; top: 0; z-index: 10; }
+  .header-inner {
+    max-width: 1180px; margin: 0 auto; padding: 0 24px;
+    display: flex; align-items: center; gap: 14px;
+  }
+  .logo { width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0; }
+  .header h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+  .header h1 .brand { color: var(--brand); }
+  .header .spacer { flex: 1; }
+  .header .api-link {
+    font-size: 13px; font-weight: 500; color: var(--fg-muted);
+    padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px;
+    transition: border-color .15s, color .15s;
+  }
+  .header .api-link:hover { color: var(--brand); border-color: var(--brand); text-decoration: none; }
+
+  /* Main */
+  .main { max-width: 1180px; margin: 0 auto; padding: 40px 24px 24px; }
+  .intro { color: var(--fg-muted); font-size: 15px; line-height: 1.55; margin-bottom: 28px; max-width: 680px; }
+  .intro strong { color: var(--fg); font-weight: 600; }
+
+  /* Status strip — 2 cards */
+  .status-strip {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;
+    margin-bottom: 32px;
+  }
+  .status-card {
+    background: #fff; border: 1px solid var(--border); border-radius: 14px;
+    padding: 20px 22px;
+  }
+  .status-card .label { font-size: 12px; font-weight: 500; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px; }
+  .status-card .value { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+
+  /* Controls */
+  .controls {
+    display: grid; grid-template-columns: 1fr 240px; gap: 12px;
+    margin-bottom: 16px;
+  }
+  .control { position: relative; }
+  .control label { position: absolute; left: -9999px; }
+  .control input, .control select {
+    width: 100%; height: 40px; padding: 0 14px;
+    font-family: inherit; font-size: 14px; color: var(--fg);
+    background: #fff; border: 1px solid var(--border); border-radius: 10px;
+    transition: border-color .15s, box-shadow .15s;
+    appearance: none; -webkit-appearance: none;
+  }
+  .control select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23888' d='M6 8L0 0h12z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 14px center;
+    padding-right: 36px; cursor: pointer;
+  }
+  .control input:focus, .control select:focus {
+    outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(89, 47, 234, .12);
+  }
+  .control .icon {
+    position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+    color: var(--fg-muted); pointer-events: none;
+  }
+  .control.search input { padding-left: 40px; }
+
+  .result-count {
+    font-size: 13px; color: var(--fg-muted); margin-bottom: 12px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .result-count strong { color: var(--fg); font-weight: 600; }
+  .result-count .clear-link { color: var(--brand); cursor: pointer; font-weight: 500; background: none; border: none; padding: 0; font: inherit; }
+  .result-count .clear-link:hover { text-decoration: underline; }
+
+  /* Table */
+  .table-wrap {
+    background: #fff; border: 1px solid var(--border); border-radius: 14px;
+    overflow: clip;
+  }
+  table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+
+  col.col-provider { width: 18%; }
+  col.col-model    { width: auto; }
+  col.col-prompt   { width: 16%; }
+  col.col-completion { width: 16%; }
+  col.col-copy    { width: 48px; }
+
+  thead th {
+    position: sticky; top: 77px; z-index: 5;
+    background: var(--bg-soft);
+    text-align: left; padding: 12px 16px; font-size: 12px; font-weight: 600;
+    color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em;
+    border-bottom: 1px solid var(--border); white-space: nowrap;
+    user-select: none;
+  }
+  thead th.num { text-align: right; }
+  thead th.sortable { cursor: pointer; }
+  thead th.sortable:hover { color: var(--fg); }
+  thead th.sortable .arrow { display: inline-block; margin-left: 4px; opacity: 0.35; font-size: 10px; }
+  thead th[aria-sort="ascending"], thead th[aria-sort="descending"] { color: var(--brand); }
+  thead th[aria-sort="ascending"] .arrow,
+  thead th[aria-sort="descending"] .arrow { opacity: 1; }
+  thead th[aria-sort="ascending"] .arrow::after { content: "↑"; }
+  thead th[aria-sort="descending"] .arrow::after { content: "↓"; }
+  thead th[aria-sort="none"] .arrow::after { content: "↕"; }
+
+  tbody tr {
+    border-bottom: 1px solid var(--border);
+    transition: background-color .1s;
+  }
+  tbody tr:hover { background: var(--brand-tint-soft); }
+  tbody tr.hidden { display: none; }
+  tbody td {
+    padding: 12px 16px; font-size: 14px; vertical-align: middle;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody .provider { color: var(--fg-muted); font-size: 13px; }
+  tbody .model { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 13px; font-weight: 500; }
+  tbody .cost { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 13px; }
+  tbody .cost-unit { color: var(--fg-muted); font-size: 11px; margin-left: 2px; }
+
+  /* Copy icon — visible on row hover */
+  .copy-cell { padding-left: 0 !important; padding-right: 12px !important; text-align: right; overflow: visible !important; }
+  .copy-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; padding: 0;
+    background: transparent; border: 1px solid transparent; border-radius: 6px;
+    color: var(--fg-muted); cursor: pointer;
+    transition: opacity .12s, color .12s, border-color .12s, background-color .12s;
+    font-family: inherit;
+  }
+  .copy-icon svg { width: 14px; height: 14px; display: block; }
+  .copy-icon:hover { color: var(--brand); border-color: var(--border); background: #fff; }
+  .copy-icon:focus-visible { outline: none; color: var(--brand); border-color: var(--brand); box-shadow: 0 0 0 3px rgba(89, 47, 234, .15); }
+  @media (hover: hover) {
+    .copy-icon { opacity: 0; }
+    tbody tr:hover .copy-icon, .copy-icon:focus-visible { opacity: 1; }
+  }
+
+  .empty-state {
+    padding: 60px 24px; text-align: center; color: var(--fg-muted); font-size: 14px;
+  }
+  .empty-state.hidden { display: none; }
+  .empty-state .clear-link { color: var(--brand); cursor: pointer; background: none; border: none; padding: 0; font: inherit; }
+  .empty-state .clear-link:hover { text-decoration: underline; }
+
+  /* Pagination */
+  .pagination {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 16px; gap: 12px; font-size: 13px; color: var(--fg-muted);
+  }
+  .pagination .info { font-variant-numeric: tabular-nums; }
+  .pagination .info strong { color: var(--fg); font-weight: 600; }
+  .pagination .buttons { display: flex; gap: 8px; }
+  .pagination button {
+    height: 32px; padding: 0 12px; font: inherit; font-size: 13px; color: var(--fg);
+    background: #fff; border: 1px solid var(--border); border-radius: 8px;
+    cursor: pointer; transition: all .12s;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .pagination button:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); }
+  .pagination button:disabled { opacity: 0.4; cursor: default; }
+
+  /* Footer */
+  .footer {
+    max-width: 1180px; margin: 0 auto; padding: 32px 24px 40px;
+    font-size: 12px; color: var(--fg-muted); text-align: center;
+  }
+  .footer a { color: inherit; text-decoration: underline; text-decoration-color: var(--border); }
+  .footer a:hover { color: var(--brand); text-decoration-color: var(--brand); }
+
+  /* Mobile */
+  @media (max-width: 720px) {
+    .header-inner, .main, .footer { padding-left: 16px; padding-right: 16px; }
+    .status-strip { grid-template-columns: 1fr; }
+    .controls { grid-template-columns: 1fr; }
+    thead { display: none; }
+    tbody tr { display: grid; grid-template-columns: 1fr 1fr auto; gap: 4px 12px; padding: 14px 16px; align-items: center; }
+    tbody td { padding: 0; border: none; }
+    tbody td.cell-provider { grid-column: 1 / 3; }
+    tbody td.cell-model { grid-column: 1 / 3; margin-bottom: 6px; }
+    tbody td.cell-prompt::before { content: "Prompt: "; color: var(--fg-muted); font-size: 11px; }
+    tbody td.cell-completion::before { content: "Completion: "; color: var(--fg-muted); font-size: 11px; }
+    tbody td.copy-cell { grid-column: 3; grid-row: 1 / 5; padding: 0 !important; }
+    tbody td.num { text-align: left; }
+  }
+</style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <svg class="logo" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect width="32" height="32" rx="6" fill="#592FEA"/>
+        <path d="M10 3.9V10H21.2C21.7 10 22.1 10.4 22.1 10.9V22.1H28.2V11.2L20.9 3.9H10Z" fill="white"/>
+        <path d="M10 21.2L10 10H3.9L3.9 15.1C3.9 22.3 10 28.2 17.2 28.2H22.1V22.1H10.9C10.4 22.1 10 21.7 10 21.2Z" fill="white"/>
+      </svg>
+      <h1><span class="brand">Openlayer</span> LLM Costs</h1>
+      <div class="spacer"></div>
+      <a class="api-link" href="/docs" target="_blank" rel="noopener">API reference ↗</a>
+    </div>
+  </header>
+
+  <main class="main">
+    <p class="intro">
+      Public per-token pricing for <strong>{{ "{:,}".format(status.total_models) }}</strong>
+      models across <strong>{{ status.total_providers }}</strong> providers, refreshed daily.
+      To query the API directly, see <a href="/docs" target="_blank" rel="noopener">/docs</a>.
+    </p>
+
+    <section class="status-strip" aria-label="Service status">
+      <div class="status-card">
+        <div class="label">Total models</div>
+        <div class="value">{{ "{:,}".format(status.total_models) }}</div>
+      </div>
+      <div class="status-card">
+        <div class="label">Providers</div>
+        <div class="value">{{ status.total_providers }}</div>
+      </div>
+    </section>
+
+    <section aria-label="Filters" class="controls">
+      <div class="control search">
+        <svg class="icon" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M11 11l3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <label for="search">Search models</label>
+        <input id="search" type="search" placeholder="Search by model or provider&hellip;" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="control">
+        <label for="provider-filter">Filter by provider</label>
+        <select id="provider-filter">
+          <option value="">All providers</option>
+          {% for p in providers %}
+          <option value="{{ p }}">{{ p }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </section>
+
+    <div class="result-count" aria-live="polite">
+      Showing
+      <strong id="visible-from">1</strong>–<strong id="visible-to">{{ ([costs|length, 50]|min) }}</strong>
+      of <strong id="visible-count">{{ "{:,}".format(costs|length) }}</strong>
+      <span id="match-suffix"> models</span>
+      <button type="button" class="clear-link hidden" id="clear-link">Clear filters</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <colgroup>
+          <col class="col-provider">
+          <col class="col-model">
+          <col class="col-prompt">
+          <col class="col-completion">
+          <col class="col-copy">
+        </colgroup>
+        <thead>
+          <tr>
+            <th scope="col" class="sortable" data-sort="provider" aria-sort="ascending">
+              Provider <span class="arrow"></span>
+            </th>
+            <th scope="col" class="sortable" data-sort="model" aria-sort="none">
+              Model <span class="arrow"></span>
+            </th>
+            <th scope="col" class="sortable num" data-sort="prompt" aria-sort="none"
+                title="USD per 1M input tokens">
+              Prompt <span class="arrow"></span>
+            </th>
+            <th scope="col" class="sortable num" data-sort="completion" aria-sort="none"
+                title="USD per 1M output tokens">
+              Completion <span class="arrow"></span>
+            </th>
+            <th scope="col" aria-label="Actions"></th>
+          </tr>
+        </thead>
+        <tbody id="rows">
+        {% for c in costs %}
+          <tr class="data-row"
+              data-provider="{{ c.provider }}"
+              data-model="{{ c.model }}"
+              data-prompt="{{ c.prompt_cost_per_token or 0 }}"
+              data-completion="{{ c.completion_cost_per_token or 0 }}"
+              data-search="{{ (c.provider ~ ' ' ~ c.model)|lower }}">
+            <td class="provider cell-provider" title="{{ c.provider }}">{{ c.provider }}</td>
+            <td class="model cell-model" title="{{ c.model }}">{{ c.model }}</td>
+            <td class="cost num cell-prompt">
+              <span class="cost-amount" data-raw="{{ c.prompt_cost_per_token or 0 }}"></span><span class="cost-unit">/1M</span>
+            </td>
+            <td class="cost num cell-completion">
+              <span class="cost-amount" data-raw="{{ c.completion_cost_per_token or 0 }}"></span><span class="cost-unit">/1M</span>
+            </td>
+            <td class="copy-cell">
+              <button type="button" class="copy-icon" data-path="/v1/costs/{{ c.provider }}/{{ c.model }}"
+                      aria-label="Copy curl for {{ c.provider }}/{{ c.model }}" title="Copy curl">
+                <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <rect x="5" y="2.5" width="8.5" height="10.5" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+                  <path d="M10.5 13v0.5A1.5 1.5 0 0 1 9 15H4a1.5 1.5 0 0 1-1.5-1.5v-8A1.5 1.5 0 0 1 4 4h0.5" stroke="currentColor" stroke-width="1.3"/>
+                </svg>
+              </button>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <div class="empty-state hidden" id="empty-state">
+        No models match the current filters.
+        <button type="button" class="clear-link" id="clear-link-empty">Clear filters</button>
+      </div>
+    </div>
+
+    <div class="pagination" id="pagination">
+      <div class="info"><strong id="page-current">1</strong> / <strong id="page-total">1</strong></div>
+      <div class="buttons">
+        <button type="button" id="page-prev" aria-label="Previous page">← Prev</button>
+        <button type="button" id="page-next" aria-label="Next page">Next →</button>
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    &copy; 2026 Unbox Inc.
+  </footer>
+
+<script>
+(function () {
+  "use strict";
+
+  // ── Cost formatting ──────────────────────────────────────────────
+  function formatCost(perToken) {
+    var perMillion = perToken * 1e6;
+    if (perMillion === 0) return "$0";
+    if (perMillion >= 100) return "$" + perMillion.toFixed(0);
+    if (perMillion >= 1) return "$" + perMillion.toFixed(2);
+    if (perMillion >= 0.01) return "$" + perMillion.toFixed(4);
+    return "$" + perMillion.toPrecision(2);
+  }
+  document.querySelectorAll(".cost-amount").forEach(function (el) {
+    var raw = parseFloat(el.dataset.raw);
+    if (!isNaN(raw)) el.textContent = formatCost(raw);
+  });
+
+  // ── State ────────────────────────────────────────────────────────
+  var PAGE_SIZE = 50;
+  var DEFAULT_SORT = "provider";
+  var DEFAULT_DIR = "asc";
+
+  var tbody = document.getElementById("rows");
+  var allRows = Array.prototype.slice.call(tbody.querySelectorAll("tr.data-row"));
+  var searchInput = document.getElementById("search");
+  var providerSelect = document.getElementById("provider-filter");
+  var visibleFromEl = document.getElementById("visible-from");
+  var visibleToEl = document.getElementById("visible-to");
+  var visibleCountEl = document.getElementById("visible-count");
+  var matchSuffixEl = document.getElementById("match-suffix");
+  var clearLink = document.getElementById("clear-link");
+  var clearLinkEmpty = document.getElementById("clear-link-empty");
+  var emptyState = document.getElementById("empty-state");
+  var headers = document.querySelectorAll("thead th.sortable");
+  var pageCurrent = document.getElementById("page-current");
+  var pageTotal = document.getElementById("page-total");
+  var pagePrev = document.getElementById("page-prev");
+  var pageNext = document.getElementById("page-next");
+  var paginationEl = document.getElementById("pagination");
+
+  var state = {
+    q: "",
+    provider: "",
+    sortKey: DEFAULT_SORT,
+    sortDir: DEFAULT_DIR,
+    page: 1,
+  };
+
+  // Precompute lowercased search index for speed.
+  var rowMeta = allRows.map(function (row) {
+    return {
+      row: row,
+      provider: row.dataset.provider,
+      model: row.dataset.model,
+      prompt: parseFloat(row.dataset.prompt),
+      completion: parseFloat(row.dataset.completion),
+      search: row.dataset.search,
+    };
+  });
+
+  // ── URL state ────────────────────────────────────────────────────
+  function readState() {
+    var p = new URLSearchParams(window.location.search);
+    state.q = p.get("q") || "";
+    state.provider = p.get("provider") || "";
+    var sort = p.get("sort") || (DEFAULT_SORT + "-" + DEFAULT_DIR);
+    var i = sort.lastIndexOf("-");
+    state.sortKey = sort.slice(0, i) || DEFAULT_SORT;
+    state.sortDir = sort.slice(i + 1) === "desc" ? "desc" : "asc";
+    state.page = Math.max(1, parseInt(p.get("page") || "1", 10));
+  }
+  function writeState() {
+    var p = new URLSearchParams();
+    if (state.q) p.set("q", state.q);
+    if (state.provider) p.set("provider", state.provider);
+    var sortRepr = state.sortKey + "-" + state.sortDir;
+    if (sortRepr !== DEFAULT_SORT + "-" + DEFAULT_DIR) p.set("sort", sortRepr);
+    if (state.page > 1) p.set("page", String(state.page));
+    var qs = p.toString();
+    history.replaceState(null, "", window.location.pathname + (qs ? "?" + qs : ""));
+  }
+
+  // ── Compute the visible (filtered + sorted + paginated) row set ──
+  function applyFilters() {
+    var q = state.q.toLowerCase().trim();
+    var provider = state.provider;
+    return rowMeta.filter(function (m) {
+      if (provider && m.provider !== provider) return false;
+      if (q && m.search.indexOf(q) === -1) return false;
+      return true;
+    });
+  }
+
+  function sortMatching(matching) {
+    var key = state.sortKey;
+    var dir = state.sortDir === "desc" ? -1 : 1;
+    matching.sort(function (a, b) {
+      if (key === "prompt" || key === "completion") {
+        return (a[key] - b[key]) * dir;
+      }
+      // String compare. Provider sort breaks ties by model.
+      var av, bv;
+      if (key === "provider") {
+        av = a.provider + " " + a.model;
+        bv = b.provider + " " + b.model;
+      } else {
+        av = a.model;
+        bv = b.model;
+      }
+      return av.localeCompare(bv) * dir;
+    });
+    return matching;
+  }
+
+  function render() {
+    var matching = sortMatching(applyFilters());
+    var total = matching.length;
+    var totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    if (state.page > totalPages) state.page = totalPages;
+
+    var start = (state.page - 1) * PAGE_SIZE;
+    var end = Math.min(total, start + PAGE_SIZE);
+    var pageRows = matching.slice(start, end).map(function (m) { return m.row; });
+    var pageRowSet = new Set(pageRows);
+
+    // Single pass: detach all rows from tbody, then re-append page rows in order.
+    // This keeps the DOM small (only ~50 rows attached at a time) → snappy paint.
+    var frag = document.createDocumentFragment();
+    pageRows.forEach(function (row) {
+      row.classList.remove("hidden");
+      frag.appendChild(row);
+    });
+    // Hide any rows still attached but not on this page.
+    allRows.forEach(function (row) {
+      if (!pageRowSet.has(row) && row.parentNode === tbody) {
+        row.classList.add("hidden");
+      }
+    });
+    tbody.appendChild(frag);
+
+    // Result count text
+    visibleCountEl.textContent = total.toLocaleString();
+    if (total === 0) {
+      visibleFromEl.textContent = "0";
+      visibleToEl.textContent = "0";
+    } else {
+      visibleFromEl.textContent = (start + 1).toLocaleString();
+      visibleToEl.textContent = end.toLocaleString();
+    }
+    var hasFilters = !!(state.q || state.provider);
+    matchSuffixEl.textContent = hasFilters ? " matching models" : " models";
+    clearLink.classList.toggle("hidden", !hasFilters);
+    emptyState.classList.toggle("hidden", total !== 0);
+    paginationEl.style.display = totalPages > 1 ? "" : "none";
+
+    // Sort indicators
+    headers.forEach(function (h) {
+      var key = h.dataset.sort;
+      h.setAttribute(
+        "aria-sort",
+        key === state.sortKey ? (state.sortDir === "desc" ? "descending" : "ascending") : "none",
+      );
+    });
+
+    // Pagination controls
+    pageCurrent.textContent = state.page.toLocaleString();
+    pageTotal.textContent = totalPages.toLocaleString();
+    pagePrev.disabled = state.page <= 1;
+    pageNext.disabled = state.page >= totalPages;
+  }
+
+  // ── Event handlers ───────────────────────────────────────────────
+  function debounce(fn, ms) {
+    var t;
+    return function () {
+      clearTimeout(t);
+      var args = arguments;
+      t = setTimeout(function () { fn.apply(null, args); }, ms);
+    };
+  }
+
+  searchInput.addEventListener("input", debounce(function () {
+    state.q = searchInput.value;
+    state.page = 1;
+    writeState();
+    render();
+  }, 80));
+
+  providerSelect.addEventListener("change", function () {
+    state.provider = providerSelect.value;
+    state.page = 1;
+    writeState();
+    render();
+  });
+
+  headers.forEach(function (h) {
+    h.addEventListener("click", function () {
+      var key = h.dataset.sort;
+      if (state.sortKey === key) {
+        state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
+      } else {
+        state.sortKey = key;
+        state.sortDir = "asc";
+      }
+      state.page = 1;
+      writeState();
+      render();
+    });
+  });
+
+  function clearAll() {
+    state.q = "";
+    state.provider = "";
+    state.sortKey = DEFAULT_SORT;
+    state.sortDir = DEFAULT_DIR;
+    state.page = 1;
+    searchInput.value = "";
+    providerSelect.value = "";
+    writeState();
+    render();
+    searchInput.focus();
+  }
+  clearLink.addEventListener("click", clearAll);
+  if (clearLinkEmpty) clearLinkEmpty.addEventListener("click", clearAll);
+
+  pagePrev.addEventListener("click", function () {
+    if (state.page > 1) { state.page--; writeState(); render(); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  });
+  pageNext.addEventListener("click", function () {
+    state.page++; writeState(); render(); window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+
+  // ── Copy-curl ────────────────────────────────────────────────────
+  var origin = window.location.origin;
+  var CHECK_SVG = '<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M3.5 8.5l3 3 6-6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  tbody.addEventListener("click", function (e) {
+    var btn = e.target.closest(".copy-icon");
+    if (!btn) return;
+    var url = origin + btn.dataset.path;
+    var originalHTML = btn.innerHTML;
+    var originalTitle = btn.getAttribute("title");
+    navigator.clipboard.writeText("curl " + url).then(function () {
+      btn.innerHTML = CHECK_SVG;
+      btn.style.color = "var(--success)";
+      btn.setAttribute("title", "Copied!");
+      setTimeout(function () {
+        btn.innerHTML = originalHTML;
+        btn.style.color = "";
+        btn.setAttribute("title", originalTitle);
+      }, 1500);
+    });
+  });
+
+  // ── Init ─────────────────────────────────────────────────────────
+  readState();
+  searchInput.value = state.q;
+  providerSelect.value = state.provider;
+  render();
+
+  window.addEventListener("popstate", function () {
+    readState();
+    searchInput.value = state.q;
+    providerSelect.value = state.provider;
+    render();
+  });
+})();
+</script>
+</body>
+</html>

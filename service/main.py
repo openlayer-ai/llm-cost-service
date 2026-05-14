@@ -5,17 +5,18 @@ from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 
-from app.api.costs import router as costs_router
-from app.api.health import router as health_router
-from app.database import create_engine, create_session_factory
+from service.api.costs import router as costs_router
+from service.api.health import router as health_router
+from service.api.pages import router as pages_router
+from service.database import create_engine, create_session_factory
 
 logger = logging.getLogger(__name__)
 
 
 async def _run_refresh(session_factory) -> None:
-    from app.costs.providers import LiteLLMCostProvider
-    from app.costs.repositories import LlmCostRepository
-    from app.costs.services import RefreshLlmCostsService
+    from service.costs.providers import LiteLLMCostProvider
+    from service.costs.repositories import LlmCostRepository
+    from service.costs.services import RefreshLlmCostsService
 
     async with session_factory() as session:
         repository = LlmCostRepository(session)
@@ -29,7 +30,7 @@ async def _run_refresh(session_factory) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from app.config import get_settings
+    from service.config import get_settings
 
     settings = get_settings()
 
@@ -66,5 +67,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="LLM Cost Service", lifespan=lifespan)
+app.include_router(pages_router)
 app.include_router(costs_router)
 app.include_router(health_router)

@@ -4,8 +4,8 @@ from sqlalchemy import distinct, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.costs.entities import LlmCostEntity
-from app.costs.models import LlmCost
+from service.costs.entities import LlmCostEntity
+from service.costs.models import LlmCost
 
 
 class LlmCostRepository:

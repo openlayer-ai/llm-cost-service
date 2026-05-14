@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest_asyncio
 
-from app.costs.entities import LlmCostEntity
-from app.costs.repositories import LlmCostRepository
+from service.costs.entities import LlmCostEntity
+from service.costs.repositories import LlmCostRepository
 
 
 @pytest_asyncio.fixture

@@ -6,3 +6,4 @@ alembic>=1.13
 pydantic-settings>=2.1
 apscheduler>=3.10
 litellm>=1.0
+jinja2>=3.1

@@ -3,9 +3,9 @@ from dataclasses import dataclass
 
 from fastapi import HTTPException
 
-from app.costs.entities import LlmCostEntity
-from app.costs.providers import CostDataProvider
-from app.costs.repositories import LlmCostRepository
+from service.costs.entities import LlmCostEntity
+from service.costs.providers import CostDataProvider
+from service.costs.repositories import LlmCostRepository
 
 
 class RefreshLlmCostsService:

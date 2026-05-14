@@ -1,7 +1,7 @@
 {
   "builds": [
     {
-      "src": "app/main.py",
+      "src": "service/main.py",
       "use": "@vercel/python",
       "config": {
         "maxDuration": 60
@@ -11,7 +11,7 @@
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "app/main.py"
+      "dest": "service/main.py"
     }
   ],
   "crons": [

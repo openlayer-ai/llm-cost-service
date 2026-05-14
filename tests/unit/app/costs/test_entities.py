@@ -6,7 +6,7 @@ import dataclasses
 
 import pytest
 
-from app.costs.entities import LlmCostEntity
+from service.costs.entities import LlmCostEntity
 
 
 class TestLlmCostEntity:
