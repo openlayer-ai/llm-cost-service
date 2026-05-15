@@ -64,6 +64,11 @@ async def get_cost(
     response.headers["Cache-Control"] = _READ_CACHE
     repository = LlmCostRepository(session)
     result = await GetLlmCostService(repository).execute(provider=provider, model=model)
+    if result.cost is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No cost data found for provider={provider!r}, model={model!r}.",
+        )
     return _to_schema(result.cost)
 
 

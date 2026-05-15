@@ -5,9 +5,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import cast
 
-import pytest
-from fastapi import HTTPException
-
 from service.costs.entities import LlmCostEntity
 from service.costs.repositories import LlmCostRepository
 from service.costs.services import GetLlmCostService, ListLlmCostsService, RefreshLlmCostsService
@@ -89,11 +86,10 @@ class TestGetLlmCostService:
         response = await GetLlmCostService(cast(LlmCostRepository, repo)).execute(provider="openai", model="gpt-4o")
         assert response.cost == entity
 
-    async def test_raises_404_when_not_found(self):
+    async def test_returns_response_with_none_when_not_found(self):
         repo = _RepositoryStub(entity=None)
-        with pytest.raises(HTTPException) as exc_info:
-            await GetLlmCostService(cast(LlmCostRepository, repo)).execute(provider="openai", model="missing")
-        assert exc_info.value.status_code == 404
+        response = await GetLlmCostService(cast(LlmCostRepository, repo)).execute(provider="openai", model="missing")
+        assert response.cost is None
 
     async def test_normalizes_provider_to_lowercase(self):
         repo = _RepositoryStub(entity=_entity())

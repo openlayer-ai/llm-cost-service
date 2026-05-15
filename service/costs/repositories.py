@@ -28,6 +28,14 @@ class LlmCostRepository:
         )
         return [self._to_entity(row) for row in result.scalars().all()]
 
+    async def list_model_names_by_provider(self, provider: str) -> list[str]:
+        result = await self.session.execute(
+            select(distinct(LlmCost.model))
+            .where(LlmCost.provider == provider)
+            .order_by(LlmCost.model)
+        )
+        return list(result.scalars().all())
+
     async def list_all(self) -> list[LlmCostEntity]:
         result = await self.session.execute(select(LlmCost))
         return [self._to_entity(row) for row in result.scalars().all()]

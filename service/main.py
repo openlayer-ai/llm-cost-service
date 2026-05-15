@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from service.api.costs import router as costs_router
 from service.api.health import router as health_router
 from service.api.pages import router as pages_router
+from service.api.providers import router as providers_router
 from service.database import create_engine, create_session_factory
 
 logger = logging.getLogger(__name__)
@@ -69,4 +70,5 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="LLM Cost Service", lifespan=lifespan)
 app.include_router(pages_router)
 app.include_router(costs_router)
+app.include_router(providers_router)
 app.include_router(health_router)
