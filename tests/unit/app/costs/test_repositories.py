@@ -55,6 +55,34 @@ class TestListByProvider:
         assert "claude-3-opus-20240229" not in models
 
 
+class TestListModelNamesByProvider:
+    async def test_returns_distinct_model_names(self, repository, openai_entity):
+        second = LlmCostEntity("openai", "gpt-4o-mini", 1.5e-7, 6e-7, "litellm")
+        await repository.upsert_all([openai_entity, second])
+        result = await repository.list_model_names_by_provider(provider="openai")
+        assert result == ["gpt-4o", "gpt-4o-mini"]
+
+    async def test_returns_sorted_results(self, repository):
+        entities = [
+            LlmCostEntity("openai", "gpt-4o-mini", 1e-7, 2e-7, "litellm"),
+            LlmCostEntity("openai", "gpt-3.5-turbo", 5e-7, 1.5e-6, "litellm"),
+            LlmCostEntity("openai", "gpt-4o", 2.5e-6, 10e-6, "litellm"),
+        ]
+        await repository.upsert_all(entities)
+        result = await repository.list_model_names_by_provider(provider="openai")
+        assert result == sorted(result)
+
+    async def test_returns_empty_list_for_unknown_provider(self, repository):
+        result = await repository.list_model_names_by_provider(provider="unknown")
+        assert result == []
+
+    async def test_excludes_other_providers(self, repository, openai_entity, anthropic_entity):
+        await repository.upsert_all([openai_entity, anthropic_entity])
+        result = await repository.list_model_names_by_provider(provider="openai")
+        assert "claude-3-opus-20240229" not in result
+        assert "gpt-4o" in result
+
+
 class TestListAll:
     async def test_returns_all_rows(self, repository, openai_entity, anthropic_entity):
         await repository.upsert_all([openai_entity, anthropic_entity])

@@ -1,8 +1,6 @@
 import time
 from dataclasses import dataclass
 
-from fastapi import HTTPException
-
 from service.costs.entities import LlmCostEntity
 from service.costs.providers import CostDataProvider
 from service.costs.repositories import LlmCostRepository
@@ -31,7 +29,7 @@ class RefreshLlmCostsService:
 class GetLlmCostService:
     @dataclass(frozen=True)
     class Response:
-        cost: LlmCostEntity
+        cost: LlmCostEntity | None
 
     def __init__(self, repository: LlmCostRepository) -> None:
         self.repository = repository
@@ -39,11 +37,6 @@ class GetLlmCostService:
     async def execute(self, provider: str, model: str) -> Response:
         normalized = provider.lower().strip()
         cost = await self.repository.get(provider=normalized, model=model)
-        if cost is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No cost data found for provider={provider!r}, model={model!r}.",
-            )
         return self.Response(cost=cost)
 
 
