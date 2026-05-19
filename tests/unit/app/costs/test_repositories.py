@@ -148,3 +148,82 @@ class TestUpsertAll:
     async def test_empty_list_returns_zero(self, repository):
         count = await repository.upsert_all([])
         assert count == 0
+
+    async def test_multiple_sources_for_same_model_coexist(self, repository):
+        litellm_row = LlmCostEntity("openai", "gpt-4o", 2.5e-6, 10e-6, "litellm")
+        openrouter_row = LlmCostEntity("openai", "gpt-4o", 2.5e-6, 10e-6, "openrouter")
+        await repository.upsert_all([litellm_row, openrouter_row])
+        all_rows = await repository.list_all(resolved=False)
+        assert len(all_rows) == 2
+        assert {r.source for r in all_rows} == {"litellm", "openrouter"}
+
+
+class TestResolvedReads:
+    async def test_get_without_source_returns_precedence_winner(self, repository):
+        litellm_row = LlmCostEntity("openai", "gpt-4o", 1e-6, 2e-6, "litellm")
+        openrouter_row = LlmCostEntity("openai", "gpt-4o", 9e-6, 9e-6, "openrouter")
+        await repository.upsert_all([litellm_row, openrouter_row])
+        result = await repository.get(provider="openai", model="gpt-4o")
+        # litellm precedes openrouter in _SOURCE_PRECEDENCE
+        assert result.source == "litellm"
+        assert result.prompt_cost_per_token == 1e-6
+
+    async def test_get_with_source_pins_to_source(self, repository):
+        litellm_row = LlmCostEntity("openai", "gpt-4o", 1e-6, 2e-6, "litellm")
+        openrouter_row = LlmCostEntity("openai", "gpt-4o", 9e-6, 9e-6, "openrouter")
+        await repository.upsert_all([litellm_row, openrouter_row])
+        result = await repository.get(provider="openai", model="gpt-4o", source="openrouter")
+        assert result.source == "openrouter"
+        assert result.prompt_cost_per_token == 9e-6
+
+    async def test_get_with_unknown_source_returns_none(self, repository, openai_entity):
+        await repository.upsert_all([openai_entity])
+        result = await repository.get(provider="openai", model="gpt-4o", source="nonexistent")
+        assert result is None
+
+    async def test_list_all_resolved_collapses_duplicates(self, repository):
+        await repository.upsert_all([
+            LlmCostEntity("openai", "gpt-4o", 1e-6, 2e-6, "litellm"),
+            LlmCostEntity("openai", "gpt-4o", 9e-6, 9e-6, "openrouter"),
+            LlmCostEntity("openai", "gpt-4o-mini", 1e-7, 2e-7, "openrouter"),
+        ])
+        rows = await repository.list_all(resolved=True)
+        assert len(rows) == 2
+        gpt4o = next(r for r in rows if r.model == "gpt-4o")
+        assert gpt4o.source == "litellm"
+
+    async def test_list_all_unresolved_returns_all_source_rows(self, repository):
+        await repository.upsert_all([
+            LlmCostEntity("openai", "gpt-4o", 1e-6, 2e-6, "litellm"),
+            LlmCostEntity("openai", "gpt-4o", 9e-6, 9e-6, "openrouter"),
+        ])
+        rows = await repository.list_all(resolved=False)
+        assert len(rows) == 2
+
+    async def test_list_by_provider_resolved_collapses_duplicates(self, repository):
+        await repository.upsert_all([
+            LlmCostEntity("openai", "gpt-4o", 1e-6, 2e-6, "litellm"),
+            LlmCostEntity("openai", "gpt-4o", 9e-6, 9e-6, "openrouter"),
+        ])
+        rows = await repository.list_by_provider(provider="openai", resolved=True)
+        assert len(rows) == 1
+        assert rows[0].source == "litellm"
+
+    async def test_list_all_filtered_by_source(self, repository):
+        await repository.upsert_all([
+            LlmCostEntity("openai", "gpt-4o", 1e-6, 2e-6, "litellm"),
+            LlmCostEntity("openai", "gpt-4o-mini", 1e-7, 2e-7, "openrouter"),
+        ])
+        rows = await repository.list_all(source="openrouter")
+        assert len(rows) == 1
+        assert rows[0].source == "openrouter"
+
+    async def test_get_status_total_models_counts_distinct_pairs(self, repository):
+        await repository.upsert_all([
+            LlmCostEntity("openai", "gpt-4o", 1e-6, 2e-6, "litellm"),
+            LlmCostEntity("openai", "gpt-4o", 9e-6, 9e-6, "openrouter"),
+            LlmCostEntity("openai", "gpt-4o-mini", 1e-7, 2e-7, "litellm"),
+        ])
+        status = await repository.get_status()
+        assert status["total_models"] == 2
+        assert status["total_providers"] == 1

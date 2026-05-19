@@ -35,15 +35,15 @@ class _RepositoryStub:
         self.list_by_provider_calls: list[str] = []
         self.upserted: list[LlmCostEntity] = []
 
-    async def get(self, *, provider, model):
-        self.get_calls.append({"provider": provider, "model": model})
+    async def get(self, *, provider, model, source=None):
+        self.get_calls.append({"provider": provider, "model": model, "source": source})
         return self._entity
 
-    async def list_all(self):
+    async def list_all(self, *, source=None, resolved=True):
         self.list_all_calls += 1
         return self._all
 
-    async def list_by_provider(self, *, provider):
+    async def list_by_provider(self, *, provider, source=None, resolved=True):
         self.list_by_provider_calls.append(provider)
         return self._by_provider
 
@@ -60,23 +60,59 @@ class _ProviderStub:
         return self._costs
 
 
+class _FailingProvider:
+    def fetch_costs(self) -> list[LlmCostEntity]:
+        raise RuntimeError("boom")
+
+
 class TestRefreshLlmCostsService:
     async def test_upserts_costs_fetched_from_provider(self):
         costs = [_entity(), _entity(provider="anthropic", model="claude-3-opus-20240229")]
         repo = _RepositoryStub()
-        await RefreshLlmCostsService(_ProviderStub(costs), cast(LlmCostRepository, repo)).execute()
+        await RefreshLlmCostsService([_ProviderStub(costs)], cast(LlmCostRepository, repo)).execute()
         assert len(repo.upserted) == 2
 
     async def test_returns_correct_row_count(self):
         costs = [_entity(), _entity(provider="anthropic", model="claude-3-opus-20240229")]
         repo = _RepositoryStub()
-        response = await RefreshLlmCostsService(_ProviderStub(costs), cast(LlmCostRepository, repo)).execute()
+        response = await RefreshLlmCostsService([_ProviderStub(costs)], cast(LlmCostRepository, repo)).execute()
         assert response.rows_affected == 2
 
     async def test_returns_non_negative_duration_ms(self):
         repo = _RepositoryStub()
-        response = await RefreshLlmCostsService(_ProviderStub([]), cast(LlmCostRepository, repo)).execute()
+        response = await RefreshLlmCostsService([_ProviderStub([])], cast(LlmCostRepository, repo)).execute()
         assert response.duration_ms >= 0
+
+    async def test_runs_multiple_providers(self):
+        litellm_costs = [_entity(source="litellm")]
+        openrouter_costs = [_entity(provider="anthropic", model="claude-opus-4.7", source="openrouter")]
+        repo = _RepositoryStub()
+        response = await RefreshLlmCostsService(
+            [_ProviderStub(litellm_costs), _ProviderStub(openrouter_costs)],
+            cast(LlmCostRepository, repo),
+        ).execute()
+        assert response.rows_affected == 2
+        assert response.per_source == {"litellm": 1, "openrouter": 1}
+        # Both sources' entities reach the repo in a single upsert batch.
+        assert len(repo.upserted) == 2
+        assert {e.source for e in repo.upserted} == {"litellm", "openrouter"}
+
+    async def test_one_provider_failing_does_not_abort_others(self):
+        costs = [_entity(source="litellm")]
+        repo = _RepositoryStub()
+        response = await RefreshLlmCostsService(
+            [_ProviderStub(costs), _FailingProvider()],
+            cast(LlmCostRepository, repo),
+        ).execute()
+        assert response.rows_affected == 1
+        assert response.per_source == {"litellm": 1}
+        assert response.failed_sources == ["_FailingProvider"]
+
+    async def test_rejects_empty_provider_list(self):
+        import pytest
+        repo = _RepositoryStub()
+        with pytest.raises(ValueError):
+            RefreshLlmCostsService([], cast(LlmCostRepository, repo))
 
 
 class TestGetLlmCostService:

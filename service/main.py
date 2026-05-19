@@ -15,17 +15,20 @@ logger = logging.getLogger(__name__)
 
 
 async def _run_refresh(session_factory) -> None:
-    from service.costs.providers import LiteLLMCostProvider
+    from service.costs.providers import LiteLLMCostProvider, OpenRouterCostProvider
     from service.costs.repositories import LlmCostRepository
     from service.costs.services import RefreshLlmCostsService
 
+    providers = [LiteLLMCostProvider(), OpenRouterCostProvider()]
     async with session_factory() as session:
         repository = LlmCostRepository(session)
-        response = await RefreshLlmCostsService(LiteLLMCostProvider(), repository).execute()
+        response = await RefreshLlmCostsService(providers, repository).execute()
     logger.info(
-        "Scheduled refresh complete: %d rows affected in %.0fms",
+        "Scheduled refresh complete: %d rows affected in %.0fms (per_source=%s, failed=%s)",
         response.rows_affected,
         response.duration_ms,
+        response.per_source,
+        response.failed_sources,
     )
 
 

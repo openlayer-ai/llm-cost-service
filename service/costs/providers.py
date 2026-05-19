@@ -46,3 +46,74 @@ class LiteLLMCostProvider:
                 )
             )
         return costs
+
+
+class OpenRouterCostProvider:
+    """Fetches model costs from OpenRouter's public models API.
+
+    OpenRouter returns ids in the form ``<vendor>/<slug>`` (e.g.
+    ``anthropic/claude-opus-4.7``). We treat OpenRouter as a broad pricing
+    source — not just for traffic that routes through OpenRouter — so we
+    strip the vendor prefix and write rows under the native vendor's name
+    (provider=anthropic, model=claude-opus-4.7).
+
+    Variants like ``:free`` and ``:thinking`` are preserved in the model
+    slug — they have distinct pricing. The ``~`` prefix on aliases like
+    ``~anthropic/claude-opus-latest`` is dropped from the provider name.
+
+    Zero-priced entries (free routes) are kept as 0.0 floats.
+    """
+
+    DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
+
+    def __init__(
+        self,
+        base_url: str = DEFAULT_BASE_URL,
+        timeout_seconds: float = 30.0,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.timeout_seconds = timeout_seconds
+
+    def fetch_costs(self) -> list[LlmCostEntity]:
+        import httpx  # noqa: PLC0415
+
+        with httpx.Client(timeout=self.timeout_seconds) as client:
+            response = client.get(f"{self.base_url}/models")
+            response.raise_for_status()
+            payload = response.json()
+
+        costs: list[LlmCostEntity] = []
+        for entry in payload.get("data", []):
+            model_id = entry.get("id")
+            if not model_id or "/" not in model_id:
+                continue
+
+            vendor, slug = model_id.split("/", 1)
+            # `~vendor/...` is an alias namespace (e.g. ~anthropic/claude-opus-latest).
+            # Drop the tilde so the row attributes to the real vendor.
+            provider = vendor.lstrip("~").lower()
+            if not provider or not slug:
+                continue
+
+            pricing = entry.get("pricing") or {}
+            prompt = pricing.get("prompt")
+            completion = pricing.get("completion")
+            if prompt is None or completion is None:
+                continue
+
+            try:
+                prompt_cost = float(prompt)
+                completion_cost = float(completion)
+            except (TypeError, ValueError):
+                continue
+
+            costs.append(
+                LlmCostEntity(
+                    provider=provider,
+                    model=slug,
+                    prompt_cost_per_token=prompt_cost,
+                    completion_cost_per_token=completion_cost,
+                    source="openrouter",
+                )
+            )
+        return costs
