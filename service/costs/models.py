@@ -13,9 +13,9 @@ class LlmCost(Base):
 
     provider: Mapped[str] = mapped_column(String(64), primary_key=True)
     model: Mapped[str] = mapped_column(String(256), primary_key=True)
+    source: Mapped[str] = mapped_column(String(64), primary_key=True)
     prompt_cost_per_token: Mapped[float] = mapped_column(Float, nullable=False)
     completion_cost_per_token: Mapped[float] = mapped_column(Float, nullable=False)
-    source: Mapped[str] = mapped_column(String(64), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

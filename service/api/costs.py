@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from service.config import get_settings
 from service.costs.entities import LlmCostEntity
-from service.costs.providers import LiteLLMCostProvider
+from service.costs.providers import LiteLLMCostProvider, OpenRouterCostProvider
 from service.costs.repositories import LlmCostRepository
 from service.costs.schemas import (
     ListCostsResponse,
@@ -21,6 +21,10 @@ from service.deps import get_db_session
 router = APIRouter(prefix="/v1/costs", tags=["costs"])
 
 _READ_CACHE = "public, max-age=3600"
+
+
+def _build_providers() -> list:
+    return [LiteLLMCostProvider(), OpenRouterCostProvider()]
 
 
 def _to_schema(entity: LlmCostEntity) -> LlmCostSchema:
@@ -46,11 +50,20 @@ async def get_status(
 async def list_costs(
     response: Response,
     provider: str | None = Query(None, description="Filter by provider name"),
+    source: str | None = Query(
+        None, description="Filter to a specific cost data source (e.g. 'litellm', 'openrouter')"
+    ),
+    resolved: bool = Query(
+        True,
+        description="Collapse multi-source rows to one row per (provider, model) using precedence",
+    ),
     session: AsyncSession = Depends(get_db_session),
 ) -> ListCostsResponse:
     response.headers["Cache-Control"] = _READ_CACHE
     repository = LlmCostRepository(session)
-    result = await ListLlmCostsService(repository).execute(provider=provider)
+    result = await ListLlmCostsService(repository).execute(
+        provider=provider, source=source, resolved=resolved
+    )
     return ListCostsResponse(costs=[_to_schema(c) for c in result.costs])
 
 
@@ -59,11 +72,16 @@ async def get_cost(
     provider: str,
     model: str,
     response: Response,
+    source: str | None = Query(
+        None, description="Pin to a specific cost data source (e.g. 'litellm', 'openrouter')"
+    ),
     session: AsyncSession = Depends(get_db_session),
 ) -> LlmCostSchema:
     response.headers["Cache-Control"] = _READ_CACHE
     repository = LlmCostRepository(session)
-    result = await GetLlmCostService(repository).execute(provider=provider, model=model)
+    result = await GetLlmCostService(repository).execute(
+        provider=provider, model=model, source=source
+    )
     if result.cost is None:
         raise HTTPException(
             status_code=404,
@@ -81,7 +99,10 @@ async def refresh_costs(
     if secret and authorization != f"Bearer {secret}":
         raise HTTPException(status_code=401, detail="Invalid or missing authorization.")
     repository = LlmCostRepository(session)
-    result = await RefreshLlmCostsService(LiteLLMCostProvider(), repository).execute()
+    result = await RefreshLlmCostsService(_build_providers(), repository).execute()
     return RefreshResponse(
-        rows_affected=result.rows_affected, duration_ms=result.duration_ms
+        rows_affected=result.rows_affected,
+        duration_ms=result.duration_ms,
+        per_source=result.per_source,
+        failed_sources=result.failed_sources,
     )
