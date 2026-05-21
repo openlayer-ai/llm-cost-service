@@ -19,6 +19,7 @@
     --bg: #ffffff;
     --bg-soft: #f8f8f8;
     --success: #1f9d55;
+    --header-h: 77px;
   }
   html { font-family: 'Geist', system-ui, -apple-system, sans-serif; }
   body { background: var(--bg); color: var(--fg); min-height: 100vh; -webkit-font-smoothing: antialiased; }
@@ -35,7 +36,7 @@
     display: flex; align-items: center; gap: 14px;
   }
   .logo { width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0; }
-  .header h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+  .header h1 { font-size: clamp(16px, 2.5vw, 20px); font-weight: 700; letter-spacing: -0.01em; }
   .header h1 .brand { color: var(--brand); }
   .header .spacer { flex: 1; }
   .header .api-link {
@@ -46,7 +47,7 @@
   .header .api-link:hover { color: var(--brand); border-color: var(--brand); text-decoration: none; }
 
   /* Main */
-  .main { max-width: 1180px; margin: 0 auto; padding: 40px 24px 24px; }
+  .main { max-width: 1180px; margin: 0 auto; padding: clamp(24px, 4vw, 40px) 24px 24px; }
   .intro { color: var(--fg-muted); font-size: 15px; line-height: 1.55; margin-bottom: 28px; max-width: 680px; }
   .intro strong { color: var(--fg); font-weight: 600; }
 
@@ -60,11 +61,11 @@
     padding: 20px 22px;
   }
   .status-card .label { font-size: 12px; font-weight: 500; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px; }
-  .status-card .value { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .status-card .value { font-size: clamp(22px, 4vw, 28px); font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 
   /* Controls */
   .controls {
-    display: grid; grid-template-columns: 1fr 240px; gap: 12px;
+    display: grid; grid-template-columns: 1fr minmax(180px, 240px); gap: 12px;
     margin-bottom: 16px;
   }
   .control { position: relative; }
@@ -130,7 +131,7 @@
   tbody td.cell-source { overflow: visible; }
 
   thead th {
-    position: sticky; top: 77px; z-index: 5;
+    position: sticky; top: var(--header-h); z-index: 5;
     background: var(--bg-soft);
     text-align: left; padding: 12px 16px; font-size: 12px; font-weight: 600;
     color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em;
@@ -214,21 +215,44 @@
   .footer a { color: inherit; text-decoration: underline; text-decoration-color: var(--border); }
   .footer a:hover { color: var(--brand); text-decoration-color: var(--brand); }
 
+  /* Tablet */
+  @media (max-width: 1024px) {
+    .controls { grid-template-columns: 1fr; }
+    .status-card .value { font-size: 24px; }
+    .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    table { min-width: 680px; }
+    thead th { top: 0; }
+  }
+
   /* Mobile */
   @media (max-width: 720px) {
+    :root { --header-h: 65px; }
     .header-inner, .main, .footer { padding-left: 16px; padding-right: 16px; }
     .status-strip { grid-template-columns: 1fr; }
     .controls { grid-template-columns: 1fr; }
+    .table-wrap { overflow-x: visible; }
+    table { display: block; min-width: 0; table-layout: auto; }
+    colgroup { display: none; }
     thead { display: none; }
+    tbody { display: block; }
     tbody tr { display: grid; grid-template-columns: 1fr 1fr auto; gap: 4px 12px; padding: 14px 16px; align-items: center; }
-    tbody td { padding: 0; border: none; }
+    tbody td { display: block; padding: 0; border: none; white-space: normal; width: auto; }
     tbody td.cell-provider { grid-column: 1 / 3; }
-    tbody td.cell-model { grid-column: 1 / 3; margin-bottom: 6px; }
+    tbody td.cell-model { grid-column: 1 / 3; margin-bottom: 6px; overflow-wrap: break-word; word-break: break-word; }
     tbody td.cell-prompt::before { content: "Prompt: "; color: var(--fg-muted); font-size: 11px; }
     tbody td.cell-completion::before { content: "Completion: "; color: var(--fg-muted); font-size: 11px; }
     tbody td.cell-source { grid-column: 1 / 3; margin-top: 4px; }
     tbody td.copy-cell { grid-column: 3; grid-row: 1 / 6; padding: 0 !important; }
     tbody td.num { text-align: left; }
+    .pagination { flex-wrap: wrap; }
+  }
+
+  /* Small phone */
+  @media (max-width: 480px) {
+    .header-inner, .main, .footer { padding-left: 12px; padding-right: 12px; }
+    .status-card { padding: 16px; }
+    .intro { font-size: 14px; }
+    .header h1 { font-size: 16px; }
   }
 </style>
 </head>
