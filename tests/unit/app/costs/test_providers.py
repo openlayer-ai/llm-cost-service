@@ -4,8 +4,80 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from service.costs.entities import LlmCostEntity
-from service.costs.providers import LiteLLMCostProvider, OpenRouterCostProvider
+from service.costs.providers import (
+    _LITELLM_PRICE_FIELDS,
+    _OPENROUTER_PRICE_FIELDS,
+    LiteLLMCostProvider,
+    OpenRouterCostProvider,
+    _build_price_details,
+    _coerce_price,
+)
+
+
+class TestCoercePrice:
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            (1e-6, 1e-6),  # float (litellm)
+            (0, 0.0),  # zero is a valid price
+            ("2.5e-6", 2.5e-6),  # string (openrouter)
+            ("0", 0.0),
+        ],
+    )
+    def test_returns_float_for_usable_numbers(self, value, expected):
+        assert _coerce_price(value) == pytest.approx(expected)
+
+    @pytest.mark.parametrize(
+        "value",
+        [None, "", "abc", "n/a", [], {}, -1e-6, "-0.5", True, False],
+    )
+    def test_returns_none_for_unusable_values(self, value):
+        # bool is an int subclass but must be rejected; negatives rejected too.
+        assert _coerce_price(value) is None
+
+
+class TestBuildPriceDetails:
+    def test_maps_present_fields_to_canonical_keys(self):
+        source = {
+            "cache_read_input_token_cost": 1.25e-6,
+            "cache_creation_input_token_cost": 3e-6,
+            "input_cost_per_audio_token": 4e-5,
+        }
+        result = _build_price_details(source, _LITELLM_PRICE_FIELDS)
+        assert result == {
+            "cached_tokens": 1.25e-6,
+            "cache_creation_tokens": 3e-6,
+            "audio_input_tokens": 4e-5,
+        }
+
+    def test_omits_absent_and_unusable_fields(self):
+        source = {
+            "cache_read_input_token_cost": 1.25e-6,
+            "cache_creation_input_token_cost": None,  # absent value
+            "input_cost_per_audio_token": "oops",  # not a number
+        }
+        result = _build_price_details(source, _LITELLM_PRICE_FIELDS)
+        assert result == {"cached_tokens": 1.25e-6}
+
+    def test_empty_when_no_granular_fields(self):
+        assert _build_price_details({"input_cost_per_token": 1e-6}, _LITELLM_PRICE_FIELDS) == {}
+
+    def test_does_not_include_base_input_output(self):
+        # input/output live at the root scalars, not in price_details.
+        assert "input_tokens" not in _LITELLM_PRICE_FIELDS
+        assert "output_tokens" not in _LITELLM_PRICE_FIELDS
+        assert "input_tokens" not in _OPENROUTER_PRICE_FIELDS
+        assert "output_tokens" not in _OPENROUTER_PRICE_FIELDS
+
+    def test_openrouter_string_prices_coerced(self):
+        result = _build_price_details(
+            {"input_cache_read": "1.5e-7", "input_cache_write": "5e-7"},
+            _OPENROUTER_PRICE_FIELDS,
+        )
+        assert result == {"cached_tokens": 1.5e-7, "cache_creation_tokens": 5e-7}
 
 
 def _entry(**kwargs) -> dict:
@@ -64,6 +136,26 @@ class TestLiteLLMCostProviderFetchCosts:
         assert e.prompt_cost_per_token == 2.5e-6
         assert e.completion_cost_per_token == 10e-6
         assert e.source == "litellm"
+
+    def test_price_details_carries_only_granular_extras(self):
+        fake = {
+            "gpt-4o": _entry(
+                input_cost_per_token=2.5e-6,
+                output_cost_per_token=10e-6,
+                cache_read_input_token_cost=1.25e-6,
+                input_cost_per_audio_token=4e-5,
+            )
+        }
+        with patch("litellm.model_cost", fake):
+            e = LiteLLMCostProvider().fetch_costs()[0]
+        # base input/output stay on the root scalars, not duplicated here.
+        assert e.price_details == {"cached_tokens": 1.25e-6, "audio_input_tokens": 4e-5}
+
+    def test_price_details_empty_for_basic_model(self):
+        fake = {"gpt-4o-mini": _entry()}
+        with patch("litellm.model_cost", fake):
+            e = LiteLLMCostProvider().fetch_costs()[0]
+        assert e.price_details == {}
 
 
 def _or_entry(model_id: str, prompt: str | None = "1e-6", completion: str | None = "2e-6", **extra) -> dict:
@@ -172,6 +264,19 @@ class TestOpenRouterCostProviderFetchCosts:
             result = OpenRouterCostProvider().fetch_costs()
         assert result[0].provider == "openai"
         assert result[0].model == "some/nested-model"
+
+    def test_price_details_carries_only_granular_extras(self):
+        payload = {
+            "data": [
+                _or_entry(
+                    "anthropic/claude-x", "5e-6", "25e-6", input_cache_read="5e-7"
+                )
+            ]
+        }
+        httpx_mod, _ = _stub_httpx(payload)
+        with patch.dict("sys.modules", {"httpx": httpx_mod}):
+            e = OpenRouterCostProvider().fetch_costs()[0]
+        assert e.price_details == {"cached_tokens": 5e-7}
 
     def test_uses_configured_base_url(self):
         payload = {"data": []}

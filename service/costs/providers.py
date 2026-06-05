@@ -4,12 +4,13 @@ from service.costs.entities import LlmCostEntity
 
 # Canonical per-category price keys — a contract shared with the SDK's
 # ``usageDetails`` and the platform cost engine (keys are matched by name).
-# Reasoning is intentionally omitted: it is billed at the output rate and is
-# already counted within ``output_tokens``, so it carries no separate price and
-# is surfaced only as an informational usage category.
+# This map holds only the GRANULAR EXTRAS: base input/output prices already live
+# at the root as ``prompt_cost_per_token`` / ``completion_cost_per_token`` (the
+# platform reuses those as ``input_tokens`` / ``output_tokens``), so they are not
+# duplicated here. Reasoning is intentionally omitted too: it is billed at the
+# output rate and already counted within output, so it carries no separate price
+# and is surfaced only as an informational usage category.
 _LITELLM_PRICE_FIELDS: dict[str, str] = {
-    "input_tokens": "input_cost_per_token",
-    "output_tokens": "output_cost_per_token",
     "cached_tokens": "cache_read_input_token_cost",
     "cache_creation_tokens": "cache_creation_input_token_cost",
     "audio_input_tokens": "input_cost_per_audio_token",
@@ -18,8 +19,6 @@ _LITELLM_PRICE_FIELDS: dict[str, str] = {
 
 # OpenRouter exposes per-category prices inside each model's ``pricing`` dict.
 _OPENROUTER_PRICE_FIELDS: dict[str, str] = {
-    "input_tokens": "prompt",
-    "output_tokens": "completion",
     "cached_tokens": "input_cache_read",
     "cache_creation_tokens": "input_cache_write",
 }
