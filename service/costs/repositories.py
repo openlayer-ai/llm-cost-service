@@ -103,6 +103,7 @@ class LlmCostRepository:
                 "model": e.model,
                 "prompt_cost_per_token": e.prompt_cost_per_token,
                 "completion_cost_per_token": e.completion_cost_per_token,
+                "price_details": e.price_details or {},
                 "source": e.source,
                 "updated_at": now,
             }
@@ -115,6 +116,7 @@ class LlmCostRepository:
             set_={
                 "prompt_cost_per_token": stmt.excluded.prompt_cost_per_token,
                 "completion_cost_per_token": stmt.excluded.completion_cost_per_token,
+                "price_details": stmt.excluded.price_details,
                 "updated_at": stmt.excluded.updated_at,
             },
         )
@@ -154,6 +156,7 @@ class LlmCostRepository:
             model=row.model,
             prompt_cost_per_token=row.prompt_cost_per_token,
             completion_cost_per_token=row.completion_cost_per_token,
+            price_details=row.price_details or {},
             source=row.source,
             updated_at=row.updated_at,
         )

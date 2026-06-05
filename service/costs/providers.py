@@ -2,6 +2,55 @@ from typing import Protocol
 
 from service.costs.entities import LlmCostEntity
 
+# Canonical per-category price keys — a contract shared with the SDK's
+# ``usageDetails`` and the platform cost engine (keys are matched by name).
+# Reasoning is intentionally omitted: it is billed at the output rate and is
+# already counted within ``output_tokens``, so it carries no separate price and
+# is surfaced only as an informational usage category.
+_LITELLM_PRICE_FIELDS: dict[str, str] = {
+    "input_tokens": "input_cost_per_token",
+    "output_tokens": "output_cost_per_token",
+    "cached_tokens": "cache_read_input_token_cost",
+    "cache_creation_tokens": "cache_creation_input_token_cost",
+    "audio_input_tokens": "input_cost_per_audio_token",
+    "audio_output_tokens": "output_cost_per_audio_token",
+}
+
+# OpenRouter exposes per-category prices inside each model's ``pricing`` dict.
+_OPENROUTER_PRICE_FIELDS: dict[str, str] = {
+    "input_tokens": "prompt",
+    "output_tokens": "completion",
+    "cached_tokens": "input_cache_read",
+    "cache_creation_tokens": "input_cache_write",
+}
+
+
+def _coerce_price(value: object) -> float | None:
+    """Return a non-negative float price, or None when not a usable number.
+
+    LiteLLM gives floats; OpenRouter gives strings. ``bool`` is rejected (it is
+    an ``int`` subclass).
+    """
+    if isinstance(value, bool):
+        return None
+    try:
+        price = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return price if price >= 0 else None
+
+
+def _build_price_details(
+    source: dict, field_map: dict[str, str]
+) -> dict[str, float]:
+    """Map a provider entry's per-category cost fields to canonical price keys."""
+    details: dict[str, float] = {}
+    for canonical, field in field_map.items():
+        price = _coerce_price(source.get(field))
+        if price is not None:
+            details[canonical] = price
+    return details
+
 
 class CostDataProvider(Protocol):
     """Interface for fetching LLM cost data from an external source."""
@@ -42,6 +91,7 @@ class LiteLLMCostProvider:
                     model=model_key,
                     prompt_cost_per_token=input_cost,
                     completion_cost_per_token=output_cost,
+                    price_details=_build_price_details(entry, _LITELLM_PRICE_FIELDS),
                     source="litellm",
                 )
             )
@@ -113,6 +163,9 @@ class OpenRouterCostProvider:
                     model=slug,
                     prompt_cost_per_token=prompt_cost,
                     completion_cost_per_token=completion_cost,
+                    price_details=_build_price_details(
+                        pricing, _OPENROUTER_PRICE_FIELDS
+                    ),
                     source="openrouter",
                 )
             )
