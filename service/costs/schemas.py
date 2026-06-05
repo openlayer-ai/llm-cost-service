@@ -10,6 +10,7 @@ class LlmCostSchema(BaseModel):
     model: str
     prompt_cost_per_token: float
     completion_cost_per_token: float
+    price_details: dict[str, float] = {}
     source: str
     updated_at: datetime
 
