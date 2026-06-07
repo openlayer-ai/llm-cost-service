@@ -11,6 +11,7 @@ class LlmCostSchema(BaseModel):
     prompt_cost_per_token: float
     completion_cost_per_token: float
     price_details: dict[str, float] = {}
+    is_chat_capable: bool | None = None
     source: str
     updated_at: datetime
 

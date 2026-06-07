@@ -104,6 +104,7 @@ class LlmCostRepository:
                 "prompt_cost_per_token": e.prompt_cost_per_token,
                 "completion_cost_per_token": e.completion_cost_per_token,
                 "price_details": e.price_details or {},
+                "is_chat_capable": e.is_chat_capable,
                 "source": e.source,
                 "updated_at": now,
             }
@@ -117,6 +118,7 @@ class LlmCostRepository:
                 "prompt_cost_per_token": stmt.excluded.prompt_cost_per_token,
                 "completion_cost_per_token": stmt.excluded.completion_cost_per_token,
                 "price_details": stmt.excluded.price_details,
+                "is_chat_capable": stmt.excluded.is_chat_capable,
                 "updated_at": stmt.excluded.updated_at,
             },
         )
@@ -157,6 +159,7 @@ class LlmCostRepository:
             prompt_cost_per_token=row.prompt_cost_per_token,
             completion_cost_per_token=row.completion_cost_per_token,
             price_details=row.price_details or {},
+            is_chat_capable=row.is_chat_capable,
             source=row.source,
             updated_at=row.updated_at,
         )

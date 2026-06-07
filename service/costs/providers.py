@@ -51,6 +51,42 @@ def _build_price_details(
     return details
 
 
+# LiteLLM ``mode`` values that denote a model usable as a chat target. "chat"
+# is the obvious one; "responses" covers Responses-API-only models (o1-pro,
+# gpt-5-pro, gpt-5-codex, ...) — they serve /v1/responses rather than
+# /v1/chat/completions but are still chat targets and must NOT be filtered out.
+_LITELLM_CHAT_MODES: frozenset[str] = frozenset({"chat", "responses"})
+
+
+def _litellm_is_chat_capable(entry: dict) -> bool | None:
+    """Whether a LiteLLM model is a usable chat target, from its ``mode``.
+
+    Non-chat modes (embedding, image_generation, audio_speech / transcription,
+    moderation, rerank, ocr, video_generation, completion, ...) are not chat
+    targets. Returns ``None`` when the entry carries no usable ``mode`` so the
+    column stays NULL and consumers fall back to their own heuristic.
+    """
+    mode = entry.get("mode")
+    if not isinstance(mode, str) or not mode:
+        return None
+    return mode.strip().lower() in _LITELLM_CHAT_MODES
+
+
+def _openrouter_is_chat_capable(entry: dict) -> bool | None:
+    """Whether an OpenRouter model is a usable chat target.
+
+    OpenRouter is a chat/completion router, so capability is determined by
+    whether the model can emit text — ``architecture.output_modalities``
+    contains "text". Returns ``None`` when the architecture/modalities are
+    absent so the column stays NULL (consumers fall back to their heuristic).
+    """
+    architecture = entry.get("architecture") or {}
+    output_modalities = architecture.get("output_modalities")
+    if not isinstance(output_modalities, list) or not output_modalities:
+        return None
+    return any(isinstance(m, str) and m.strip().lower() == "text" for m in output_modalities)
+
+
 class CostDataProvider(Protocol):
     """Interface for fetching LLM cost data from an external source."""
 
@@ -91,6 +127,7 @@ class LiteLLMCostProvider:
                     prompt_cost_per_token=input_cost,
                     completion_cost_per_token=output_cost,
                     price_details=_build_price_details(entry, _LITELLM_PRICE_FIELDS),
+                    is_chat_capable=_litellm_is_chat_capable(entry),
                     source="litellm",
                 )
             )
@@ -165,6 +202,7 @@ class OpenRouterCostProvider:
                     price_details=_build_price_details(
                         pricing, _OPENROUTER_PRICE_FIELDS
                     ),
+                    is_chat_capable=_openrouter_is_chat_capable(entry),
                     source="openrouter",
                 )
             )
