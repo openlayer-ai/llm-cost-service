@@ -34,6 +34,7 @@ def _to_schema(entity: LlmCostEntity) -> LlmCostSchema:
         prompt_cost_per_token=entity.prompt_cost_per_token,
         completion_cost_per_token=entity.completion_cost_per_token,
         price_details=entity.price_details or {},
+        is_chat_capable=entity.is_chat_capable,
         source=entity.source,
         updated_at=entity.updated_at,
     )

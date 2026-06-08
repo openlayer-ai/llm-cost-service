@@ -14,6 +14,8 @@ from service.costs.providers import (
     OpenRouterCostProvider,
     _build_price_details,
     _coerce_price,
+    _litellm_is_chat_capable,
+    _openrouter_is_chat_capable,
 )
 
 
@@ -157,6 +159,54 @@ class TestLiteLLMCostProviderFetchCosts:
             e = LiteLLMCostProvider().fetch_costs()[0]
         assert e.price_details == {}
 
+    @pytest.mark.parametrize("mode", ["chat", "responses", "Chat", "  responses  "])
+    def test_is_chat_capable_true_for_chat_modes(self, mode):
+        # "responses" matters: Responses-API-only models (o1-pro, gpt-5-pro,
+        # gpt-5-codex) are tagged mode="responses" but are still chat targets.
+        fake = {"m": _entry(mode=mode)}
+        with patch("litellm.model_cost", fake):
+            assert LiteLLMCostProvider().fetch_costs()[0].is_chat_capable is True
+
+    @pytest.mark.parametrize(
+        "mode",
+        [
+            "embedding",
+            "image_generation",
+            "audio_speech",
+            "audio_transcription",
+            "moderation",
+            "rerank",
+            "completion",  # legacy text-completion endpoint, not a chat target
+        ],
+    )
+    def test_is_chat_capable_false_for_non_chat_modes(self, mode):
+        fake = {"m": _entry(mode=mode)}
+        with patch("litellm.model_cost", fake):
+            assert LiteLLMCostProvider().fetch_costs()[0].is_chat_capable is False
+
+    def test_is_chat_capable_none_when_mode_absent(self):
+        # No mode in the entry -> unknown -> NULL (consumer falls back).
+        fake = {"m": _entry()}
+        with patch("litellm.model_cost", fake):
+            assert LiteLLMCostProvider().fetch_costs()[0].is_chat_capable is None
+
+
+class TestLiteLLMIsChatCapableHelper:
+    @pytest.mark.parametrize(
+        "entry,expected",
+        [
+            ({"mode": "chat"}, True),
+            ({"mode": "responses"}, True),
+            ({"mode": "embedding"}, False),
+            ({"mode": "image_generation"}, False),
+            ({"mode": ""}, None),
+            ({"mode": None}, None),
+            ({}, None),  # no mode key at all
+        ],
+    )
+    def test_classifies_from_mode(self, entry, expected):
+        assert _litellm_is_chat_capable(entry) is expected
+
 
 def _or_entry(model_id: str, prompt: str | None = "1e-6", completion: str | None = "2e-6", **extra) -> dict:
     pricing: dict = {}
@@ -284,3 +334,48 @@ class TestOpenRouterCostProviderFetchCosts:
         with patch.dict("sys.modules", {"httpx": httpx_mod}):
             OpenRouterCostProvider(base_url="https://example.com/api/v1").fetch_costs()
         assert captured == ["https://example.com/api/v1/models"]
+
+    def test_is_chat_capable_true_for_text_output(self):
+        entry = _or_entry("openai/gpt-x", "1e-6", "2e-6")
+        entry["architecture"] = {"output_modalities": ["text"]}
+        httpx_mod, _ = _stub_httpx({"data": [entry]})
+        with patch.dict("sys.modules", {"httpx": httpx_mod}):
+            assert OpenRouterCostProvider().fetch_costs()[0].is_chat_capable is True
+
+    def test_is_chat_capable_true_when_text_among_multiple_outputs(self):
+        # Multimodal output that still includes text is a usable chat target.
+        entry = _or_entry("google/gemini-x", "1e-6", "2e-6")
+        entry["architecture"] = {"output_modalities": ["image", "text"]}
+        httpx_mod, _ = _stub_httpx({"data": [entry]})
+        with patch.dict("sys.modules", {"httpx": httpx_mod}):
+            assert OpenRouterCostProvider().fetch_costs()[0].is_chat_capable is True
+
+    def test_is_chat_capable_false_for_non_text_output(self):
+        entry = _or_entry("vendor/image-only", "1e-6", "2e-6")
+        entry["architecture"] = {"output_modalities": ["image"]}
+        httpx_mod, _ = _stub_httpx({"data": [entry]})
+        with patch.dict("sys.modules", {"httpx": httpx_mod}):
+            assert OpenRouterCostProvider().fetch_costs()[0].is_chat_capable is False
+
+    def test_is_chat_capable_none_when_architecture_absent(self):
+        # _or_entry produces no architecture key -> unknown -> NULL.
+        payload = {"data": [_or_entry("openai/gpt-x", "1e-6", "2e-6")]}
+        httpx_mod, _ = _stub_httpx(payload)
+        with patch.dict("sys.modules", {"httpx": httpx_mod}):
+            assert OpenRouterCostProvider().fetch_costs()[0].is_chat_capable is None
+
+
+class TestOpenRouterIsChatCapableHelper:
+    @pytest.mark.parametrize(
+        "entry,expected",
+        [
+            ({"architecture": {"output_modalities": ["text"]}}, True),
+            ({"architecture": {"output_modalities": ["text", "image"]}}, True),
+            ({"architecture": {"output_modalities": ["image"]}}, False),
+            ({"architecture": {"output_modalities": []}}, None),
+            ({"architecture": {}}, None),  # no modalities key
+            ({}, None),  # no architecture key
+        ],
+    )
+    def test_classifies_from_output_modalities(self, entry, expected):
+        assert _openrouter_is_chat_capable(entry) is expected

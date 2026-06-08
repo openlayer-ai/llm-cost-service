@@ -49,7 +49,24 @@ class TestListCosts:
         assert "prompt_cost_per_token" in cost
         assert "completion_cost_per_token" in cost
         assert "source" in cost
+        assert "is_chat_capable" in cost
         assert "updated_at" in cost
+
+    async def test_serializes_is_chat_capable_value(self, client, session, now):
+        # Regression: the stored is_chat_capable must reach the response body,
+        # not be dropped by the entity->schema mapping.
+        entity = LlmCostEntity(
+            provider="openai",
+            model="gpt-4o",
+            prompt_cost_per_token=2.5e-6,
+            completion_cost_per_token=10e-6,
+            source="litellm",
+            is_chat_capable=True,
+            updated_at=now,
+        )
+        await LlmCostRepository(session).upsert_all([entity])
+        resp = await client.get("/v1/costs")
+        assert resp.json()["costs"][0]["is_chat_capable"] is True
 
 
 class TestGetCost:
