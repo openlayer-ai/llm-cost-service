@@ -139,6 +139,80 @@ class TestLiteLLMCostProviderFetchCosts:
         assert e.completion_cost_per_token == 10e-6
         assert e.source == "litellm"
 
+    def test_strips_redundant_provider_prefix(self):
+        # azure keys carry a redundant "azure/" prefix that duplicates the
+        # provider column; it must be stripped from the model name.
+        fake = {"azure/codex-mini": _entry(litellm_provider="azure")}
+        with patch("litellm.model_cost", fake):
+            e = LiteLLMCostProvider().fetch_costs()[0]
+        assert e.provider == "azure"
+        assert e.model == "codex-mini"
+
+    def test_preserves_region_sub_namespace(self):
+        # Only the leading "<provider>/" segment is stripped, so region
+        # sub-namespaces (which carry distinct pricing) survive.
+        fake = {"azure/eu/gpt-4o-2024-08-06": _entry(litellm_provider="azure")}
+        with patch("litellm.model_cost", fake):
+            e = LiteLLMCostProvider().fetch_costs()[0]
+        assert e.model == "eu/gpt-4o-2024-08-06"
+
+    def test_leaves_bare_keys_untouched(self):
+        # First-party vendors (and the odd unprefixed azure key) are already
+        # bare and must pass through unchanged.
+        fake = {
+            "gpt-4o": _entry(litellm_provider="openai"),
+            "computer-use-preview": _entry(litellm_provider="azure"),
+        }
+        with patch("litellm.model_cost", fake):
+            models = {(e.provider, e.model) for e in LiteLLMCostProvider().fetch_costs()}
+        assert models == {("openai", "gpt-4o"), ("azure", "computer-use-preview")}
+
+    def test_only_strips_matching_provider_prefix(self):
+        # A "/" in the key that isn't the provider prefix stays put.
+        fake = {"foo/bar": _entry(litellm_provider="openai")}
+        with patch("litellm.model_cost", fake):
+            e = LiteLLMCostProvider().fetch_costs()[0]
+        assert e.model == "foo/bar"
+
+    @pytest.mark.parametrize("bare_first", [True, False])
+    def test_dedupes_collision_keeps_priced_over_zero(self, bare_first):
+        # Mirrors the real "gemini-exp-1206" quirk: the bare key holds the real
+        # price and the prefixed key is a zero-priced alias. One row survives,
+        # and the non-zero price wins regardless of dict order.
+        bare = ("gemini-exp-1206", _entry(
+            litellm_provider="gemini", input_cost_per_token=3e-7, output_cost_per_token=2.5e-6
+        ))
+        prefixed = ("gemini/gemini-exp-1206", _entry(
+            litellm_provider="gemini", input_cost_per_token=0, output_cost_per_token=0
+        ))
+        items = [bare, prefixed] if bare_first else [prefixed, bare]
+        with patch("litellm.model_cost", dict(items)):
+            result = LiteLLMCostProvider().fetch_costs()
+        assert len(result) == 1
+        e = result[0]
+        assert (e.provider, e.model) == ("gemini", "gemini-exp-1206")
+        assert e.prompt_cost_per_token == 3e-7
+        assert e.completion_cost_per_token == 2.5e-6
+
+    @pytest.mark.parametrize("bare_first", [True, False])
+    def test_dedupes_collision_prefixed_breaks_price_tie(self, bare_first):
+        # When price doesn't decide (both priced), the prefixed/canonical entry
+        # wins the tie — deterministically, not by dict order. Distinct prices
+        # here only to observe which entry survived.
+        bare = ("computer-use-preview", _entry(
+            litellm_provider="azure", input_cost_per_token=1e-6, output_cost_per_token=1e-6
+        ))
+        prefixed = ("azure/computer-use-preview", _entry(
+            litellm_provider="azure", input_cost_per_token=3e-6, output_cost_per_token=12e-6
+        ))
+        items = [bare, prefixed] if bare_first else [prefixed, bare]
+        with patch("litellm.model_cost", dict(items)):
+            result = LiteLLMCostProvider().fetch_costs()
+        assert len(result) == 1
+        e = result[0]
+        assert (e.provider, e.model) == ("azure", "computer-use-preview")
+        assert e.prompt_cost_per_token == 3e-6  # the prefixed entry's price
+
     def test_price_details_carries_only_granular_extras(self):
         fake = {
             "gpt-4o": _entry(

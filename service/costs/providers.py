@@ -98,6 +98,25 @@ class LiteLLMCostProvider:
 
     No network call is made — LiteLLM ships the cost data as a JSON file
     that is read at import time. Imported lazily to avoid startup overhead.
+
+    LiteLLM keys many models with a redundant ``<litellm_provider>/`` prefix
+    (e.g. ``azure/codex-mini`` with ``litellm_provider="azure"``, or
+    ``azure/eu/gpt-4o-...``) while first-party vendors like openai/anthropic
+    are keyed bare (``gpt-4o``). The prefix duplicates the ``provider`` column
+    and makes model names harder for consumers to match, so we strip a single
+    leading ``<provider>/`` segment — writing ``codex-mini`` /
+    ``eu/gpt-4o-...`` under provider ``azure``. This mirrors what
+    ``OpenRouterCostProvider`` already does with its ``<vendor>/`` prefix, and
+    aligns the two sources' naming so the same model resolves to one row.
+
+    Stripping can collapse two source keys onto one ``(provider, model)`` name
+    (e.g. ``azure/computer-use-preview`` and a bare ``computer-use-preview``,
+    both provider ``azure``). We de-duplicate deterministically: the collided
+    pair almost always shares a price, but where it disagrees (e.g.
+    ``gemini-exp-1206``: one key priced, the other ``0``) we keep the
+    non-zero-priced entry — a zero price is treated as a stale/placeholder
+    alias. The ``<provider>/``-prefixed (canonical) entry only breaks ties that
+    price doesn't, so dict order never decides.
     """
 
     # LiteLLM's data file includes a `sample_spec` placeholder entry whose
@@ -105,10 +124,26 @@ class LiteLLMCostProvider:
     # model. Drop it so it doesn't pollute the table.
     _SKIP_MODELS = frozenset({"sample_spec"})
 
+    @staticmethod
+    def _strip_provider_prefix(model_key: str, provider: str) -> str:
+        """Drop a single leading ``<provider>/`` segment from a model key.
+
+        Only the leading segment is removed, so region sub-namespaces are
+        preserved (``azure/eu/gpt-4o`` -> ``eu/gpt-4o``). Keys without the
+        prefix (``gpt-4o``, ``computer-use-preview``) are returned unchanged.
+        """
+        prefix = f"{provider}/"
+        return model_key[len(prefix):] if model_key.startswith(prefix) else model_key
+
     def fetch_costs(self) -> list[LlmCostEntity]:
         import litellm  # noqa: PLC0415
 
-        costs = []
+        # Keyed by (provider, model) so prefix-stripping collisions collapse to
+        # one entry. On collision the higher-ranked candidate wins (see doc):
+        # rank = (has a non-zero price, key was prefixed). Stored alongside each
+        # winner so the comparison is order-independent.
+        by_key: dict[tuple[str, str], tuple[tuple[int, int], LlmCostEntity]] = {}
+
         for model_key, entry in litellm.model_cost.items():
             if model_key in self._SKIP_MODELS:
                 continue
@@ -120,18 +155,28 @@ class LiteLLMCostProvider:
             if input_cost is None or output_cost is None or not provider:
                 continue
 
-            costs.append(
+            model = self._strip_provider_prefix(model_key, provider)
+            was_prefixed = model != model_key
+            key = (provider, model)
+            rank = (int(bool(input_cost) or bool(output_cost)), int(was_prefixed))
+
+            existing = by_key.get(key)
+            if existing is not None and rank <= existing[0]:
+                continue
+
+            by_key[key] = (
+                rank,
                 LlmCostEntity(
                     provider=provider,
-                    model=model_key,
+                    model=model,
                     prompt_cost_per_token=input_cost,
                     completion_cost_per_token=output_cost,
                     price_details=_build_price_details(entry, _LITELLM_PRICE_FIELDS),
                     is_chat_capable=_litellm_is_chat_capable(entry),
                     source="litellm",
-                )
+                ),
             )
-        return costs
+        return [entity for _, entity in by_key.values()]
 
 
 class OpenRouterCostProvider:

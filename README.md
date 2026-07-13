@@ -9,7 +9,7 @@ Consumers (Openlayer platform, gateway) fetch the full cost table on startup and
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/v1/costs` | List all costs. Optional `?provider=` filter. |
-| `GET` | `/v1/costs/{provider}/{model}` | Get cost for a specific model. `model` may contain slashes (e.g. `gemini/gemini-1.5-pro`). Returns 404 if not found. |
+| `GET` | `/v1/costs/{provider}/{model}` | Get cost for a specific model. Model names carry no redundant provider prefix (e.g. provider `azure`, model `codex-mini`), but `model` may still contain slashes for region sub-namespaces (e.g. `eu/gpt-4o-2024-08-06`). Returns 404 if not found. |
 | `POST` | `/v1/costs/refresh` | Fetch latest costs from LiteLLM and upsert into the DB. |
 | `GET` | `/health` | Liveness check. |
 

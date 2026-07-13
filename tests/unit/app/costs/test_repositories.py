@@ -157,6 +157,16 @@ class TestUpsertAll:
         assert len(all_rows) == 2
         assert {r.source for r in all_rows} == {"litellm", "openrouter"}
 
+    async def test_dedupes_duplicate_pk_within_batch(self, repository):
+        # Two entities sharing (provider, model, source) must not crash the
+        # single ON CONFLICT insert; last writer wins.
+        first = LlmCostEntity("azure", "computer-use-preview", 1e-6, 1e-6, "litellm")
+        second = LlmCostEntity("azure", "computer-use-preview", 3e-6, 12e-6, "litellm")
+        count = await repository.upsert_all([first, second])
+        assert count == 1
+        result = await repository.get(provider="azure", model="computer-use-preview")
+        assert result.prompt_cost_per_token == 3e-6
+
 
 class TestResolvedReads:
     async def test_get_without_source_returns_precedence_winner(self, repository):

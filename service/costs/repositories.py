@@ -96,6 +96,15 @@ class LlmCostRepository:
         if not entities:
             return 0
 
+        # Collapse to one row per PK (provider, model, source): a single
+        # INSERT ... ON CONFLICT cannot touch the same conflict target twice
+        # (Postgres errors), and a source can legitimately yield duplicate PKs
+        # (e.g. LiteLLM keys that coincide after prefix-stripping). Last writer
+        # wins — providers already resolve their own collisions upstream.
+        deduped: dict[tuple[str, str, str], LlmCostEntity] = {
+            (e.provider, e.model, e.source): e for e in entities
+        }
+
         now = datetime.now(timezone.utc)
         rows = [
             {
@@ -108,7 +117,7 @@ class LlmCostRepository:
                 "source": e.source,
                 "updated_at": now,
             }
-            for e in entities
+            for e in deduped.values()
         ]
 
         stmt = pg_insert(LlmCost).values(rows)
