@@ -17,9 +17,62 @@ jobs:
       - run: uv sync
       - run: uv run pytest
 
-  deploy:
+  # Did this push touch a migration? Kept as a separate no-secret job so the
+  # `production` environment (and any required approval on it) is only engaged
+  # by the `migrate` job below when there is actually something to apply.
+  detect-migrations:
     needs: test
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.filter.outputs.migrations }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            migrations:
+              - 'alembic/versions/**'
+
+  # Apply migrations BEFORE deploy so the schema is always a superset the
+  # running (old) code tolerates, and the new code finds it in place. Assumes
+  # backward-compatible ("expand") migrations; a destructive change must be
+  # split across two deploys (expand, then contract) rather than run here.
+  migrate:
+    needs: detect-migrations
+    if: needs.detect-migrations.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - name: Current revision
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: uv run alembic current
+      - name: Apply migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: uv run alembic upgrade head
+      - name: Resulting revision
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: uv run alembic current
+
+  deploy:
+    needs: [test, detect-migrations, migrate]
+    # `migrate` is skipped when no migration changed, so gate on always() and
+    # accept migrate = success OR skipped; still block deploy if it failed.
+    if: |
+      always()
+      && github.ref == 'refs/heads/main'
+      && github.event_name == 'push'
+      && needs.test.result == 'success'
+      && (needs.migrate.result == 'success' || needs.migrate.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
