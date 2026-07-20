@@ -1,296 +1,510 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>
+  // Theme resolution — same mechanism and storage key as the Openlayer app:
+  // data-theme attribute on <html>, driven by localStorage 'openlayer:colorscheme'
+  // ('system' | 'light' | 'dark'), 'system' resolving via prefers-color-scheme.
+  (function () {
+    var pref = null;
+    try { pref = localStorage.getItem("openlayer:colorscheme"); } catch (e) { /* storage may be blocked */ }
+    pref = pref || "system";
+    var dark = pref === "dark" ||
+      (pref !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+  })();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..800&family=Geist+Mono:wght@400..600&display=swap" rel="stylesheet">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect width='180' height='180' rx='32' fill='%23592FEA'/><path d='M56 22V56H118.84C121.69 56 124 58.32 124 61.16V124H158V62.8L117.2 22H56Z' fill='white'/><path d='M56.01 118.84L56 56H22L22.01 84.87C22.01 125.25 55.95 158 96.34 158H124V124H61.16C58.31 124 56 121.69 56 118.84H56.01Z' fill='white'/></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,%3Csvg width='16' height='16' viewBox='0 0 16 16' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='16' height='16' rx='2' fill='%23592FEA'/%3E%3Cpath d='M5.0002 2V5.00006H10.5445C10.7958 5.00006 11.0001 5.20432 11.0001 5.45564V11.0002H14V5.60007L10.4001 2H5.0002Z' fill='white'/%3E%3Cpath d='M5.0009 10.5446L4.99983 5.00006H2L2.00116 7.54697C2.00116 11.1104 4.99537 14 8.55968 14H10.9998L10.9997 11.0002H5.4554C5.20409 11.0002 4.99983 10.7959 4.99983 10.5446H5.0009Z' fill='white'/%3E%3C/svg%3E">
 <title>Openlayer LLM Costs</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  :root {
-    --brand: #592FEA;
-    --brand-tint-soft: #fafaff;
-    --fg: #0a0a0a;
-    --fg-muted: #888;
-    --border: #ebebeb;
-    --bg: #ffffff;
-    --bg-soft: #f8f8f8;
-    --success: #1f9d55;
-    --header-h: 77px;
-  }
-  html { font-family: 'Geist', system-ui, -apple-system, sans-serif; }
-  body { background: var(--bg); color: var(--fg); min-height: 100vh; -webkit-font-smoothing: antialiased; }
-  code, .mono { font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
 
-  a { color: var(--brand); text-decoration: none; }
+  /* ── Openlayer design tokens (Radix-style scales from unbox-app) ── */
+  :root {
+    --font-ui: "Inter", Arial, Helvetica, sans-serif;
+    --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+    --bg: #FCFCFC;                          /* gray-1  — page */
+    --surface: #FFFFFF;                     /* base-12 — cards, header, table header */
+    --shell-bg: rgba(255, 255, 255, 0.55);  /* base-7  — table shell */
+    --fg: #202020;                          /* gray-12 — primary text */
+    --fg-muted: #646464;                    /* gray-11 — secondary text */
+    --fg-subtle: #8D8D8D;                   /* gray-9  — decorative icons */
+    --placeholder: #CECECE;                 /* gray-7  — input placeholders */
+
+    --gray-a2: rgba(0, 0, 0, 0.02);         /* row hover, input bg */
+    --gray-a3: rgba(0, 0, 0, 0.06);         /* hairline borders, ghost hover */
+    --gray-a4: rgba(0, 0, 0, 0.09);         /* card/shell borders */
+    --gray-a5: rgba(0, 0, 0, 0.12);         /* control borders */
+    /* gray-a2 flattened over the table surface — opaque so the row borders
+       don't visibly shift when the translucent hover background lands. */
+    --row-border: #FAFAFA;
+
+    --brand: #592FEA;                       /* brand-9 */
+    --brand-hover: #4E12D8;                 /* brand-10 */
+    --link: #5C3EE6;                        /* brand-11 */
+    --ring: rgba(0, 15, 255, 0.21);         /* brand-a6 — button/select ring */
+    --ring-input: rgba(0, 26, 255, 0.16);   /* brand-a5 — text-input ring */
+    --brand-tint-text: rgba(40, 0, 222, 0.76);  /* brand-a11 */
+    --inverted-2: rgba(0, 0, 0, 0.1);       /* toast ring */
+
+    --logo-grad-end: #C9CCFF;               /* brand-6 */
+  }
+  :root[data-theme="dark"] {
+    --bg: #111111;
+    --surface: #000000;
+    --shell-bg: rgba(0, 0, 0, 0.5);
+    --fg: #EEEEEE;
+    --fg-muted: #B4B4B4;
+    --fg-subtle: #6E6E6E;
+    --placeholder: #484848;
+
+    --gray-a2: rgba(255, 255, 255, 0.04);
+    --gray-a3: rgba(255, 255, 255, 0.07);
+    --gray-a4: rgba(255, 255, 255, 0.11);
+    --gray-a5: rgba(255, 255, 255, 0.13);
+    --row-border: #0A0A0A;
+
+    --link: #A8AAFF;                        /* brand-11 dark */
+    --ring: rgba(100, 78, 255, 0.56);       /* brand-a6 dark */
+    --ring-input: rgba(89, 63, 253, 0.5);   /* brand-a5 dark */
+    --brand-tint-text: #A8AAFF;
+    --inverted-2: rgba(255, 255, 255, 0.15);
+    --logo-grad-end: rgb(63, 51, 150);      /* brand-6 dark */
+  }
+  :root { color-scheme: light; }
+  :root[data-theme="dark"] { color-scheme: dark; }
+
+  /* Suppress transitions for one frame while the theme flips, so surfaces
+     with background transitions don't tear against ones without. */
+  html.theme-switching *, html.theme-switching *::before, html.theme-switching *::after {
+    transition: none !important;
+  }
+
+  html { font-family: var(--font-ui); }
+  /* App frame, like the app's root layout: full-viewport gray background
+     with 8px (p-7) padding; everything else lives inside the canvas. */
+  body {
+    background: var(--bg); color: var(--fg);
+    height: 100vh; padding: 8px; overflow: hidden;
+    display: flex; flex-direction: column;
+    font-size: 13px; line-height: 1.5; letter-spacing: 0.001em;
+    -webkit-font-smoothing: antialiased;
+  }
+  @supports (height: 100dvh) {
+    body { height: 100dvh; }
+  }
+  code, .mono { font-family: var(--font-mono); }
+
+  a { color: var(--link); text-decoration: none; }
   a:hover { text-decoration: underline; }
   .hidden { display: none !important; }
-
-  /* Header */
-  .header { background: #fff; border-bottom: 1px solid var(--border); padding: 20px 0; position: sticky; top: 0; z-index: 10; }
-  .header-inner {
-    max-width: 1180px; margin: 0 auto; padding: 0 24px;
-    display: flex; align-items: center; gap: 14px;
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
   }
-  .logo { width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0; }
-  .header h1 { font-size: clamp(16px, 2.5vw, 20px); font-weight: 700; letter-spacing: -0.01em; }
-  .header h1 .brand { color: var(--brand); }
-  .header .spacer { flex: 1; }
-  .header .api-link {
-    font-size: 13px; font-weight: 500; color: var(--fg-muted);
-    padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px;
-    transition: border-color .15s, color .15s;
-  }
-  .header .api-link:hover { color: var(--brand); border-color: var(--brand); text-decoration: none; }
 
-  /* Main */
-  .main { max-width: 1180px; margin: 0 auto; padding: clamp(24px, 4vw, 40px) 24px 24px; }
-  .intro { color: var(--fg-muted); font-size: 15px; line-height: 1.55; margin-bottom: 28px; max-width: 680px; }
-  .intro strong { color: var(--fg); font-weight: 600; }
-
-  /* Status strip — 2 cards */
-  .status-strip {
-    display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;
-    margin-bottom: 32px;
+  /* ── Top strip — header content rendered above the canvas, in the frame
+     gap (the same slot the app uses for above/below-canvas notices) ── */
+  .top-strip {
+    flex-shrink: 0;
+    display: flex; align-items: center; gap: 10px;
+    padding: 2px 8px 8px;
   }
-  .status-card {
-    background: #fff; border: 1px solid var(--border); border-radius: 14px;
-    padding: 20px 22px;
+  /* Title + crafted-by align by text baseline (they differ in font size). */
+  .strip-left { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+  .top-strip .strip-title { font-size: 13px; font-weight: 500; line-height: 28px; color: var(--fg); white-space: nowrap; }
+  .top-strip .spacer { flex: 1; }
+  .crafted-by {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 12px; color: var(--fg-muted); white-space: nowrap;
   }
-  .status-card .label { font-size: 12px; font-weight: 500; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px; }
-  .status-card .value { font-size: clamp(22px, 4vw, 28px); font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .crafted-by .crafted-link {
+    display: inline-flex; align-items: center; gap: 5px;
+    color: var(--link); font-weight: 500; cursor: pointer;
+    transition: color .2s;
+  }
+  .crafted-by .crafted-link:hover { text-decoration: none; }
+  .crafted-by .logo { width: 14px; height: 14px; flex-shrink: 0; display: block; }
+  /* Primary button (small scale), per the app's Button.tsx: brand-9 fill,
+     white-a12 text, gray-a5 border; brand-10 on hover/actus + brand-a6 ring. */
+  .top-strip .api-link {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    height: 28px; padding: 0 8px;
+    white-space: nowrap; flex-shrink: 0;
+    font-size: 13px; font-weight: 500; line-height: 1.1;
+    color: rgba(255, 255, 255, 0.95); /* white-a12 */
+    background: var(--brand); border: 1px solid var(--gray-a5); border-radius: 8px;
+    transition: all .2s;
+  }
+  .top-strip .api-link:hover { text-decoration: none; }
+  .top-strip .api-link:hover:not(:active):not(:focus) { background: var(--brand-hover); }
+  .top-strip .api-link:active, .top-strip .api-link:focus {
+    outline: none; background: var(--brand-hover);
+    box-shadow: 0 0 0 3px var(--ring);
+  }
+  .top-strip .api-link svg { width: 12px; height: 12px; flex-shrink: 0; }
 
-  /* Controls */
+  /* ── Canvas — the bordered app surface, like the app's root layout ── */
+  .canvas {
+    flex: 1; min-height: 0;
+    display: flex; flex-direction: column; overflow: hidden;
+    border-radius: 12px; border: 1px solid var(--gray-a4);
+    background: var(--surface);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -4px rgba(0, 0, 0, 0.05); /* shadow-lg black-a1 */
+  }
+  .canvas-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+
+  /* Button.IconBase from the app: 16px (!size-[1rem]), rounded-5 (4px), no
+     fill or border; gray-9 icon, gray-12 on hover, brand-11 + ring on actus. */
+  .theme-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; padding: 0;
+    background: transparent; border: none; border-radius: 4px;
+    color: var(--fg-subtle); cursor: pointer;
+    transition: all .2s;
+    backface-visibility: hidden; transform: translateZ(0); will-change: opacity;
+  }
+  .theme-toggle:hover:not(:active):not(:focus-visible) { color: var(--fg); }
+  .theme-toggle:active, .theme-toggle:focus-visible { outline: none; color: var(--link); box-shadow: 0 0 0 3px var(--ring); }
+  .theme-toggle svg { width: 12px; height: 12px; display: block; }
+  .theme-toggle .icon-moon { display: none; }
+  :root[data-theme="dark"] .theme-toggle .icon-sun { display: none; }
+  :root[data-theme="dark"] .theme-toggle .icon-moon { display: block; }
+
+  /* ── Main ── */
+  .main { max-width: 1180px; margin: 0 auto; padding: 28px 24px 24px; }
+  .intro { color: var(--fg-muted); font-size: 13px; line-height: 1.6; margin-bottom: 24px; }
+  .intro .stat { color: var(--fg); font-weight: 500; font-variant-numeric: tabular-nums; }
+  .intro .stat-word { color: var(--fg); }
+
+  /* ── Controls — 32px fields, 8px radius, alpha-gray fill ── */
   .controls {
-    display: grid; grid-template-columns: 1fr minmax(180px, 240px); gap: 12px;
-    margin-bottom: 16px;
+    display: grid; grid-template-columns: minmax(0, 400px) minmax(180px, 240px) auto;
+    gap: 8px; align-items: center;
+    margin-bottom: 12px;
   }
   .control { position: relative; }
   .control label { position: absolute; left: -9999px; }
   .control input, .control select {
-    width: 100%; height: 40px; padding: 0 14px;
-    font-family: inherit; font-size: 14px; color: var(--fg);
-    background: #fff; border: 1px solid var(--border); border-radius: 10px;
-    transition: border-color .15s, box-shadow .15s;
+    width: 100%; height: 32px; padding: 0 12px;
+    font-family: inherit; font-size: 13px; color: var(--fg);
+    background: var(--gray-a2); border: 1px solid var(--gray-a5); border-radius: 8px;
+    transition: border-color .2s, box-shadow .2s, background-color .2s;
     appearance: none; -webkit-appearance: none;
   }
+  .control input::placeholder { color: var(--placeholder); }
   .control select {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23888' d='M6 8L0 0h12z'/%3E%3C/svg%3E");
-    background-repeat: no-repeat; background-position: right 14px center;
-    padding-right: 36px; cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='none' stroke='%23BBBBBB' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round' d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 12px center;
+    padding-right: 32px; cursor: pointer;
   }
-  .control input:focus, .control select:focus {
-    outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(89, 47, 234, .12);
+  :root[data-theme="dark"] .control select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='none' stroke='%23606060' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round' d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+  }
+  .control input:focus {
+    outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--ring-input);
+  }
+  .control select:focus {
+    outline: none; border-color: var(--link); box-shadow: 0 0 0 3px var(--ring);
   }
   .control .icon {
-    position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
-    color: var(--fg-muted); pointer-events: none;
+    position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+    color: var(--fg-subtle); pointer-events: none;
   }
-  .control.search input { padding-left: 40px; }
+  .control.search input { padding-left: 32px; }
 
+  /* Fixed at the Clear-filters button height so toggling it causes no shift. */
   .result-count {
-    font-size: 13px; color: var(--fg-muted); margin-bottom: 12px;
-    display: flex; align-items: center; gap: 12px;
+    display: flex; align-items: center; gap: 4px; height: 28px;
+    font-size: 13px; color: var(--fg-muted); white-space: nowrap; padding-left: 4px;
   }
-  .result-count strong { color: var(--fg); font-weight: 600; }
-  .result-count .clear-link { color: var(--brand); cursor: pointer; font-weight: 500; background: none; border: none; padding: 0; font: inherit; }
-  .result-count .clear-link:hover { text-decoration: underline; }
+  .result-count strong { color: var(--fg); font-weight: 500; font-variant-numeric: tabular-nums; }
+  /* Clear filters — secondary button, small scale (28px, rounded-7, text-2). */
+  .clear-link {
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 28px; padding: 0 8px;
+    font-family: inherit; font-size: 13px; font-weight: 500; line-height: 1.1;
+    color: var(--fg);
+    background: var(--surface); border: 1px solid var(--gray-a5); border-radius: 8px;
+    cursor: pointer; transition: all .2s;
+  }
+  .clear-link:hover:not(:active):not(:focus) { background: var(--gray-a2); }
+  .clear-link:active, .clear-link:focus {
+    outline: none; border-color: var(--brand-tint-text); /* brand-a11 */
+    box-shadow: 0 0 0 3px var(--ring);
+  }
+  .result-count .clear-link { margin-left: 10px; }
 
-  /* Table */
+  /* ── Table — dense, hairline-separated, 12px-radius shell ── */
   .table-wrap {
-    background: #fff; border: 1px solid var(--border); border-radius: 14px;
+    background: var(--shell-bg); border: 1px solid var(--gray-a4); border-radius: 12px;
     overflow: clip;
   }
   table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
 
   col.col-provider { width: 16%; }
   col.col-model    { width: auto; }
-  col.col-prompt   { width: 14%; }
-  col.col-completion { width: 14%; }
+  col.col-prompt   { width: 13%; }
+  col.col-completion { width: 13%; }
   col.col-source   { width: 110px; }
-  col.col-copy    { width: 48px; }
-
-  /* Source pill — compact provenance label */
-  .source-pill {
-    display: inline-flex; align-items: center;
-    padding: 2px 9px; border-radius: 999px;
-    font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px; font-weight: 500; letter-spacing: 0.02em;
-    text-transform: lowercase;
-    border: 1px solid transparent;
-  }
-  .source-pill.source-litellm   { background: #f1f1f4; color: #5b5b66; }
-  .source-pill.source-openrouter { background: rgba(89, 47, 234, 0.08); color: var(--brand); }
-  .source-pill.source-unknown   { background: var(--bg-soft); color: var(--fg-muted); border-color: var(--border); }
-  a.source-pill { text-decoration: none; transition: filter .12s, box-shadow .12s; }
-  a.source-pill:hover { text-decoration: none; filter: brightness(0.96); box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.04); }
-  a.source-pill:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(89, 47, 234, 0.18); }
-  tbody td.cell-source { overflow: visible; }
+  col.col-copy    { width: 36px; }
 
   thead th {
-    position: sticky; top: var(--header-h); z-index: 5;
-    background: var(--bg-soft);
-    text-align: left; padding: 12px 16px; font-size: 12px; font-weight: 600;
-    color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em;
-    border-bottom: 1px solid var(--border); white-space: nowrap;
+    position: sticky; top: 0; z-index: 5;
+    background: var(--surface);
+    text-align: left; padding: 7px 4px; font-size: 13px; font-weight: 500;
+    color: var(--fg); line-height: 1.25rem;
+    border-bottom: 1px solid var(--gray-a3); white-space: nowrap;
     user-select: none;
   }
   thead th.num { text-align: right; }
-  thead th.sortable { cursor: pointer; }
-  thead th.sortable:hover { color: var(--fg); }
-  thead th.sortable .arrow { display: inline-block; margin-left: 4px; opacity: 0.35; font-size: 10px; }
-  thead th[aria-sort="ascending"], thead th[aria-sort="descending"] { color: var(--brand); }
-  thead th[aria-sort="ascending"] .arrow,
-  thead th[aria-sort="descending"] .arrow { opacity: 1; }
-  thead th[aria-sort="ascending"] .arrow::after { content: "↑"; }
-  thead th[aria-sort="descending"] .arrow::after { content: "↓"; }
-  thead th[aria-sort="none"] .arrow::after { content: "↕"; }
-
-  tbody tr {
-    border-bottom: 1px solid var(--border);
-    transition: background-color .1s;
+  thead th:first-child { padding-left: 8px; }
+  tbody td:first-child { padding-left: 16px; }
+  /* Sort control — ghost button with caret/arrow icons, like the app's Table header */
+  .th-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 28px; padding: 0 8px;
+    background: transparent; border: 1px solid transparent; border-radius: 8px;
+    font-family: inherit; font-size: 13px; font-weight: 500; color: var(--fg);
+    cursor: pointer;
+    transition: background-color .2s, border-color .2s, box-shadow .2s;
   }
-  tbody tr:hover { background: var(--brand-tint-soft); }
+  .th-btn:hover { background: var(--gray-a3); }
+  .th-btn:focus-visible { outline: none; border-color: var(--link); box-shadow: 0 0 0 3px var(--ring); }
+  .th-btn svg { width: 12px; height: 12px; color: var(--fg-subtle); flex-shrink: 0; }
+  .th-btn .sort-arrow { transition: transform .1s; }
+  thead th[aria-sort="none"] .sort-arrow { display: none; }
+  thead th[aria-sort="ascending"] .sort-caret,
+  thead th[aria-sort="descending"] .sort-caret { display: none; }
+  thead th[aria-sort="ascending"] .sort-arrow { transform: rotate(180deg); }
+
+  .row-break { display: none; }
+  tbody tr { transition: background-color .1s; }
+  tbody tr:hover { background: var(--gray-a2); }
   tbody tr.hidden { display: none; }
   tbody td {
-    padding: 12px 16px; font-size: 14px; vertical-align: middle;
+    padding: 8px 12px; font-size: 13px; vertical-align: middle;
+    border-bottom: 1px solid var(--row-border);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
+  tbody tr:last-child td { border-bottom: none; }
   tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
-  tbody .provider { color: var(--fg-muted); font-size: 13px; }
-  tbody .model { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 13px; font-weight: 500; }
-  tbody .cost { font-family: 'Geist Mono', ui-monospace, monospace; font-size: 13px; }
+  tbody .provider { color: var(--fg-muted); }
   tbody .cost-unit { color: var(--fg-muted); font-size: 11px; margin-left: 2px; }
 
-  /* Copy icon — visible on row hover */
-  .copy-cell { padding-left: 0 !important; padding-right: 12px !important; text-align: right; overflow: visible !important; }
-  .copy-icon {
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 28px; height: 28px; padding: 0;
-    background: transparent; border: 1px solid transparent; border-radius: 6px;
-    color: var(--fg-muted); cursor: pointer;
-    transition: opacity .12s, color .12s, border-color .12s, background-color .12s;
-    font-family: inherit;
+  /* ── Source — provider logo + plain text ── */
+  .source-link {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--fg-muted);
+    transition: color .2s;
   }
-  .copy-icon svg { width: 14px; height: 14px; display: block; }
-  .copy-icon:hover { color: var(--brand); border-color: var(--border); background: #fff; }
-  .copy-icon:focus-visible { outline: none; color: var(--brand); border-color: var(--brand); box-shadow: 0 0 0 3px rgba(89, 47, 234, .15); }
+  a.source-link:hover { color: var(--fg); text-decoration: none; }
+  a.source-link:focus-visible { outline: 2px solid var(--link); outline-offset: 1px; }
+  .source-logo {
+    width: 14px; height: 14px; flex-shrink: 0;
+    background-size: contain; background-repeat: no-repeat; background-position: center;
+  }
+  .source-logo-litellm { background-image: url("data:image/png;base64,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"); }
+  .source-logo-openrouter { background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20401.4%20293.7'%3E%3Cpath%20fill='%237624F4'%20d='M303.9475,17.19926c42.79734,0,77.48933,34.69327,77.48933,77.48933s-34.69199,77.48933-77.48933,77.48933l76.86166,76.86244c9.76367,9.76313,2.84903,26.45667-10.95697,26.45667h-220.88335c-71.32686,0-129.14889-57.82202-129.14889-129.14889S77.64197,17.19926,148.96884,17.19926h154.97866ZM148.96884,68.85881c-42.79607,0-77.48933,34.69327-77.48933,77.48933s34.69327,77.48933,77.48933,77.48933,77.48933-34.69327,77.48933-77.48933-34.69327-77.48933-77.48933-77.48933Z'/%3E%3C/svg%3E"); }
+  :root[data-theme="dark"] .source-logo-openrouter { background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20401.4%20293.7'%3E%3Cpath%20fill='%23C8FF00'%20d='M303.9475,17.19926c42.79734,0,77.48933,34.69327,77.48933,77.48933s-34.69199,77.48933-77.48933,77.48933l76.86166,76.86244c9.76367,9.76313,2.84903,26.45667-10.95697,26.45667h-220.88335c-71.32686,0-129.14889-57.82202-129.14889-129.14889S77.64197,17.19926,148.96884,17.19926h154.97866ZM148.96884,68.85881c-42.79607,0-77.48933,34.69327-77.48933,77.48933s34.69327,77.48933,77.48933,77.48933,77.48933-34.69327,77.48933-77.48933-34.69327-77.48933-77.48933-77.48933Z'/%3E%3C/svg%3E"); }
+  tbody td.cell-source { overflow: visible; }
+
+  /* ── Copy button — Button.IconBase, visible on row hover ── */
+  .copy-cell { padding-left: 0 !important; padding-right: 8px !important; text-align: right; overflow: visible !important; }
+  .copy-icon {
+    position: relative;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; padding: 0;
+    background: transparent; border: none; border-radius: 4px;
+    color: var(--fg-subtle); cursor: pointer;
+    transition: opacity .2s, color .2s, box-shadow .2s;
+    font-family: inherit;
+    backface-visibility: hidden; transform: translateZ(0); will-change: opacity;
+  }
+  .copy-icon svg { width: 12px; height: 12px; display: block; }
+  .copy-icon:hover:not(:active):not(:focus-visible) { color: var(--fg); }
+  .copy-icon:active, .copy-icon:focus-visible { outline: none; color: var(--link); box-shadow: 0 0 0 3px var(--ring); }
+  /* Paint the tooltip above the sticky table header (thead th is z-index 5). */
+  .copy-icon:hover, .copy-icon:focus-visible { z-index: 6; }
+  /* Tooltip — the app's short variant: gray-1 surface, gray-a4 hairline,
+     8px radius, 12px medium text, 8px side offset. */
+  .copy-icon::after {
+    content: attr(data-tooltip);
+    position: absolute; bottom: calc(100% + 8px); right: 0;
+    display: flex; align-items: center;
+    min-height: 28px; padding: 3px 10px;
+    border: 1px solid var(--gray-a4); border-radius: 8px;
+    background: var(--bg);
+    font-size: 12px; font-weight: 500; line-height: 1.25rem; color: var(--fg);
+    white-space: nowrap;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    opacity: 0; pointer-events: none;
+    transition: opacity .15s;
+  }
+  .copy-icon:hover::after, .copy-icon:focus-visible::after { opacity: 1; transition-delay: .3s; }
   @media (hover: hover) {
     .copy-icon { opacity: 0; }
     tbody tr:hover .copy-icon, .copy-icon:focus-visible { opacity: 1; }
   }
 
+  /* ── Toasts — the app's sonner card: gray-1 surface, inverted-2 ring,
+     colored sign bar, title/description, secondary Dismiss button ── */
+  .toaster {
+    position: fixed; bottom: 24px; right: 24px; z-index: 50;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 10px;
+  }
+  .toast {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    width: 364px; max-width: calc(100vw - 32px);
+    border-radius: 10px; background: var(--bg);
+    padding: 22px 20px;
+    box-shadow: 0 0 0 1px var(--inverted-2);
+    opacity: 0; transform: translateY(16px);
+    transition: opacity .35s cubic-bezier(.21, 1.02, .73, 1), transform .35s cubic-bezier(.21, 1.02, .73, 1);
+  }
+  .toast.toast-visible { opacity: 1; transform: translateY(0); }
+  .toast-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .toast-sign { align-self: stretch; min-height: 36px; width: 3px; border-radius: 999px; flex-shrink: 0; }
+  .toast-sign-success { background: #14B866; } /* status-success-9 */
+  .toast-sign-error { background: #F2330D; }   /* status-error-9 */
+  .toast-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .toast-title { font-size: 13px; font-weight: 500; color: var(--fg); line-height: 1.25rem; }
+  .toast-desc { font-size: 13px; color: var(--fg-subtle); line-height: 1.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .toast-dismiss {
+    flex-shrink: 0; height: 28px; padding: 0 8px;
+    display: inline-flex; align-items: center;
+    font-family: inherit; font-size: 13px; font-weight: 500; color: var(--fg);
+    background: var(--surface); border: 1px solid var(--gray-a5); border-radius: 8px;
+    cursor: pointer; transition: all .2s;
+  }
+  .toast-dismiss:hover:not(:active):not(:focus) { background: var(--gray-a2); }
+  .toast-dismiss:active, .toast-dismiss:focus {
+    outline: none; border-color: var(--brand-tint-text); /* brand-a11 */
+    box-shadow: 0 0 0 3px var(--ring);
+  }
+
   .empty-state {
-    padding: 60px 24px; text-align: center; color: var(--fg-muted); font-size: 14px;
+    padding: 48px 24px; text-align: center; color: var(--fg-muted); font-size: 13px;
   }
   .empty-state.hidden { display: none; }
-  .empty-state .clear-link { color: var(--brand); cursor: pointer; background: none; border: none; padding: 0; font: inherit; }
-  .empty-state .clear-link:hover { text-decoration: underline; }
-
-  /* Pagination */
-  .pagination {
-    display: flex; align-items: center; justify-content: space-between;
-    margin-top: 16px; gap: 12px; font-size: 13px; color: var(--fg-muted);
-  }
-  .pagination .info { font-variant-numeric: tabular-nums; }
-  .pagination .info strong { color: var(--fg); font-weight: 600; }
-  .pagination .buttons { display: flex; gap: 8px; }
-  .pagination button {
-    height: 32px; padding: 0 12px; font: inherit; font-size: 13px; color: var(--fg);
-    background: #fff; border: 1px solid var(--border); border-radius: 8px;
-    cursor: pointer; transition: all .12s;
-    display: inline-flex; align-items: center; gap: 4px;
-  }
-  .pagination button:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); }
-  .pagination button:disabled { opacity: 0.4; cursor: default; }
-
-  /* Footer */
-  .footer {
-    max-width: 1180px; margin: 0 auto; padding: 32px 24px 40px;
-    font-size: 12px; color: var(--fg-muted); text-align: center;
-  }
-  .footer a { color: inherit; text-decoration: underline; text-decoration-color: var(--border); }
-  .footer a:hover { color: var(--brand); text-decoration-color: var(--brand); }
+  .empty-state p { margin-bottom: 12px; }
 
   /* Tablet */
   @media (max-width: 1024px) {
     .controls { grid-template-columns: 1fr; }
-    .status-card .value { font-size: 24px; }
+    .result-count { white-space: normal; padding-left: 0; }
     .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     table { min-width: 680px; }
-    thead th { top: 0; }
   }
 
   /* Mobile */
   @media (max-width: 720px) {
-    :root { --header-h: 65px; }
-    .header-inner, .main, .footer { padding-left: 16px; padding-right: 16px; }
-    .status-strip { grid-template-columns: 1fr; }
+    .main { padding: 16px; }
+    /* xsmall scale on mobile */
+    .top-strip .api-link { height: 24px; padding: 0 8px; gap: 4px; font-size: 12px; border-radius: 6px; }
     .controls { grid-template-columns: 1fr; }
-    .table-wrap { overflow-x: visible; }
+    /* No sticky thead or horizontal scroll in the card layout — leave the
+       shell unclipped so copy tooltips can extend past the table's top edge. */
+    .table-wrap { overflow: visible; }
     table { display: block; min-width: 0; table-layout: auto; }
     colgroup { display: none; }
     thead { display: none; }
     tbody { display: block; }
-    tbody tr { display: grid; grid-template-columns: 1fr 1fr auto; gap: 4px 12px; padding: 14px 16px; align-items: center; }
+    /* Card layout: line 1 = provider/model + copy icon, source at the right;
+       line 2 = $x/1M prompt · $y/1M completion. */
+    tbody tr {
+      display: flex; flex-wrap: wrap; align-items: center;
+      column-gap: 6px; row-gap: 4px;
+      padding: 12px 16px; border-bottom: 1px solid var(--row-border);
+    }
+    tbody tr:last-child { border-bottom: none; }
     tbody td { display: block; padding: 0; border: none; white-space: normal; width: auto; }
-    tbody td.cell-provider { grid-column: 1 / 3; }
-    tbody td.cell-model { grid-column: 1 / 3; margin-bottom: 6px; overflow-wrap: break-word; word-break: break-word; }
-    tbody td.cell-prompt::before { content: "Prompt: "; color: var(--fg-muted); font-size: 11px; }
-    tbody td.cell-completion::before { content: "Completion: "; color: var(--fg-muted); font-size: 11px; }
-    tbody td.cell-source { grid-column: 1 / 3; margin-top: 4px; }
-    tbody td.copy-cell { grid-column: 3; grid-row: 1 / 6; padding: 0 !important; }
+    tbody td:first-child { padding-left: 0; }
+    tbody td.cell-provider { order: 1; }
+    tbody td.cell-provider::after { content: "/"; margin-left: 6px; color: var(--fg-subtle); }
+    tbody td.cell-model { order: 2; min-width: 0; overflow-wrap: anywhere; }
+    tbody td.copy-cell { order: 3; padding: 0 !important; }
+    tbody td.cell-source { order: 4; margin-left: auto; }
+    tbody td.row-break { order: 5; display: block; flex-basis: 100%; height: 0; padding: 0 !important; }
+    tbody td.cell-prompt { order: 6; margin-right: 12px; }
+    tbody td.cell-completion { order: 7; }
+    tbody td.cell-prompt::after { content: "prompt"; margin-left: 4px; font-size: 12px; color: var(--fg-muted); }
+    tbody td.cell-completion::after { content: "completion"; margin-left: 4px; font-size: 12px; color: var(--fg-muted); }
     tbody td.num { text-align: left; }
-    .pagination { flex-wrap: wrap; }
   }
 
   /* Small phone */
   @media (max-width: 480px) {
-    .header-inner, .main, .footer { padding-left: 12px; padding-right: 12px; }
-    .status-card { padding: 16px; }
-    .intro { font-size: 14px; }
-    .header h1 { font-size: 16px; }
+    .main { padding-left: 12px; padding-right: 12px; }
   }
 </style>
 </head>
 <body>
-  <header class="header">
-    <div class="header-inner">
-      <svg class="logo" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <rect width="32" height="32" rx="6" fill="#592FEA"/>
-        <path d="M10 3.9V10H21.2C21.7 10 22.1 10.4 22.1 10.9V22.1H28.2V11.2L20.9 3.9H10Z" fill="white"/>
-        <path d="M10 21.2L10 10H3.9L3.9 15.1C3.9 22.3 10 28.2 17.2 28.2H22.1V22.1H10.9C10.4 22.1 10 21.7 10 21.2Z" fill="white"/>
-      </svg>
-      <h1><span class="brand">Openlayer</span> LLM Costs</h1>
+  <header class="top-strip">
+      <div class="strip-left">
+      <span class="strip-title">LLM costs</span>
+      <span class="crafted-by">
+        Crafted by
+        <a class="crafted-link" href="https://www.openlayer.com" target="_blank" rel="noopener">
+        <svg class="logo" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M5.00033 0V4.99989H14.2408C14.6597 4.99989 15.0001 5.34032 15.0001 5.75917V14.9997H20V5.99987L14.0001 0H5.00033Z" fill="url(#logo-grad)"/>
+          <path d="M5.0015 14.2404L4.99972 4.99989H0L0.00192924 9.24456C0.00192924 15.1833 4.99228 19.9992 10.9328 19.9992H14.9997L14.9995 14.9997H5.75899C5.34015 14.9997 4.99972 14.6592 4.99972 14.2404H5.0015Z" fill="url(#logo-grad)"/>
+          <defs>
+            <linearGradient id="logo-grad" x1="10" y1="0" x2="10" y2="19.9992" gradientUnits="userSpaceOnUse">
+              <stop style="stop-color:var(--brand)"/>
+              <stop offset="1" style="stop-color:var(--logo-grad-end)"/>
+            </linearGradient>
+          </defs>
+        </svg>
+        Openlayer
+        </a>
+      </span>
+      </div>
       <div class="spacer"></div>
-      <a class="api-link" href="/docs" target="_blank" rel="noopener">API reference ↗</a>
-    </div>
+      <a class="api-link" href="/docs" target="_blank" rel="noopener">Use via API</a>
+      <button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false" aria-label="Dark color scheme" title="Toggle color scheme">
+        <svg class="icon-sun" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+          <g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" stroke="currentColor">
+            <circle cx="6" cy="6" r="2.25"></circle>
+            <line x1="6" y1=".75" x2="6" y2="1.5"></line>
+            <line x1="9.712" y1="2.288" x2="9.182" y2="2.818"></line>
+            <line x1="11.25" y1="6" x2="10.5" y2="6"></line>
+            <line x1="9.712" y1="9.712" x2="9.182" y2="9.182"></line>
+            <line x1="6" y1="11.25" x2="6" y2="10.5"></line>
+            <line x1="2.288" y1="9.712" x2="2.818" y2="9.182"></line>
+            <line x1=".75" y1="6" x2="1.5" y2="6"></line>
+            <line x1="2.288" y1="2.288" x2="2.818" y2="2.818"></line>
+          </g>
+        </svg>
+        <svg class="icon-moon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+          <g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" stroke="currentColor">
+            <path d="m10.744,2.492l-.946-.315-.316-.947c-.102-.306-.609-.306-.711,0l-.316.947-.946.315c-.153.051-.257.194-.257.356s.104.305.257.356l.946.315.316.947c.051.153.194.256.355.256s.305-.104.355-.256l.316-.947.946-.315c.153-.051.257-.194.257-.356s-.104-.305-.257-.356h.001Z" fill="currentColor" stroke-width="0"></path>
+            <path d="m8.5,7.75c-2.347,0-4.25-1.903-4.25-4.25,0-1.018.373-1.939.969-2.671C2.693,1.208.75,3.368.75,6c0,2.899,2.351,5.25,5.25,5.25,2.632,0,4.792-1.943,5.171-4.469-.732.597-1.653.969-2.671.969Z"></path>
+          </g>
+        </svg>
+      </button>
   </header>
 
+  <div class="canvas">
+  <div class="canvas-scroll" id="canvas-scroll">
   <main class="main">
+    <h1 class="sr-only">LLM costs</h1>
     <p class="intro">
-      Public per-token pricing for <strong>{{ "{:,}".format(status.total_models) }}</strong>
-      models across <strong>{{ status.total_providers }}</strong> providers, refreshed daily.
+      Public per-token pricing for <span class="stat">{{ "{:,}".format(status.total_models) }}</span>
+      <span class="stat-word">models</span> across <span class="stat">{{ status.total_providers }}</span>
+      <span class="stat-word">providers</span>, refreshed daily.
       To query the API directly, see <a href="/docs" target="_blank" rel="noopener">/docs</a>.
     </p>
 
-    <section class="status-strip" aria-label="Service status">
-      <div class="status-card">
-        <div class="label">Total models</div>
-        <div class="value">{{ "{:,}".format(status.total_models) }}</div>
-      </div>
-      <div class="status-card">
-        <div class="label">Providers</div>
-        <div class="value">{{ status.total_providers }}</div>
-      </div>
-    </section>
-
     <section aria-label="Filters" class="controls">
       <div class="control search">
-        <svg class="icon" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <svg class="icon" width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5"/>
           <path d="M11 11l3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
         </svg>
@@ -306,18 +520,15 @@
           {% endfor %}
         </select>
       </div>
+      <div class="result-count" aria-live="polite">
+        <strong id="visible-count">{{ "{:,}".format(costs|length) }}</strong>
+        <span id="match-suffix"> models</span>
+        <button type="button" class="clear-link hidden" id="clear-link">Clear filters</button>
+      </div>
     </section>
 
-    <div class="result-count" aria-live="polite">
-      Showing
-      <strong id="visible-from">1</strong>–<strong id="visible-to">{{ ([costs|length, 50]|min) }}</strong>
-      of <strong id="visible-count">{{ "{:,}".format(costs|length) }}</strong>
-      <span id="match-suffix"> models</span>
-      <button type="button" class="clear-link hidden" id="clear-link">Clear filters</button>
-    </div>
-
     <div class="table-wrap">
-      <table>
+      <table role="table">
         <colgroup>
           <col class="col-provider">
           <col class="col-model">
@@ -327,62 +538,69 @@
           <col class="col-copy">
         </colgroup>
         <thead>
-          <tr>
-            <th scope="col" class="sortable" data-sort="provider" aria-sort="ascending">
-              Provider <span class="arrow"></span>
+          <tr role="row">
+            {% set sort_columns = [
+              ('provider', 'Provider', '', 'ascending'),
+              ('model', 'Model', '', 'none'),
+              ('prompt', 'Prompt', 'USD per 1M input tokens', 'none'),
+              ('completion', 'Completion', 'USD per 1M output tokens', 'none'),
+              ('source', 'Source', 'Where this price came from', 'none'),
+            ] %}
+            {% for key, label, tooltip, initial in sort_columns %}
+            <th scope="col" role="columnheader"
+                class="sortable{{ ' num' if key in ('prompt', 'completion') else '' }}"
+                data-sort="{{ key }}" aria-sort="{{ initial }}">
+              <button type="button" class="th-btn"{% if tooltip %} title="{{ tooltip }}"{% endif %}>
+                {{ label }}
+                <svg class="sort-caret" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <path fill-rule="evenodd" clip-rule="evenodd" d="M5.64645 0.646447C5.84171 0.451184 6.15829 0.451184 6.35355 0.646447L9.10355 3.39645C9.29882 3.59171 9.29882 3.90829 9.10355 4.10355C8.90829 4.29882 8.59171 4.29882 8.39645 4.10355L6 1.70711L3.60355 4.10355C3.40829 4.29882 3.09171 4.29882 2.89645 4.10355C2.70118 3.90829 2.70118 3.59171 2.89645 3.39645L5.64645 0.646447ZM2.89645 7.89645C3.09171 7.70118 3.40829 7.70118 3.60355 7.89645L6 10.2929L8.39645 7.89645C8.59171 7.70118 8.90829 7.70118 9.10355 7.89645C9.29882 8.09171 9.29882 8.40829 9.10355 8.60355L6.35355 11.3536C6.15829 11.5488 5.84171 11.5488 5.64645 11.3536L2.89645 8.60355C2.70118 8.40829 2.70118 8.09171 2.89645 7.89645Z" fill="currentColor"/>
+                </svg>
+                <svg class="sort-arrow" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <path d="M6.5 9.79289L8.89645 7.39645C9.09171 7.20118 9.40829 7.20118 9.60355 7.39645C9.79882 7.59171 9.79882 7.90829 9.60355 8.10355L6.35355 11.3536C6.15829 11.5488 5.84171 11.5488 5.64645 11.3536L2.39645 8.10355C2.20118 7.90829 2.20118 7.59171 2.39645 7.39645C2.59171 7.20118 2.90829 7.20118 3.10355 7.39645L5.5 9.79289L5.5 1C5.5 0.723858 5.72386 0.5 6 0.5C6.27614 0.5 6.5 0.723858 6.5 1L6.5 9.79289Z" fill="currentColor"/>
+                </svg>
+              </button>
             </th>
-            <th scope="col" class="sortable" data-sort="model" aria-sort="none">
-              Model <span class="arrow"></span>
-            </th>
-            <th scope="col" class="sortable num" data-sort="prompt" aria-sort="none"
-                title="USD per 1M input tokens">
-              Prompt <span class="arrow"></span>
-            </th>
-            <th scope="col" class="sortable num" data-sort="completion" aria-sort="none"
-                title="USD per 1M output tokens">
-              Completion <span class="arrow"></span>
-            </th>
-            <th scope="col" class="sortable" data-sort="source" aria-sort="none"
-                title="Where this price came from">
-              Source <span class="arrow"></span>
-            </th>
-            <th scope="col" aria-label="Actions"></th>
+            {% endfor %}
+            <th scope="col" role="columnheader" aria-label="Actions"></th>
           </tr>
         </thead>
         <tbody id="rows">
         {% for c in costs %}
-          <tr class="data-row"
+          <tr class="data-row" role="row"
               data-provider="{{ c.provider }}"
               data-model="{{ c.model }}"
               data-prompt="{{ c.prompt_cost_per_token or 0 }}"
               data-completion="{{ c.completion_cost_per_token or 0 }}"
               data-source="{{ c.source }}"
               data-search="{{ (c.provider ~ ' ' ~ c.model)|lower }}">
-            <td class="provider cell-provider" title="{{ c.provider }}">{{ c.provider }}</td>
-            <td class="model cell-model" title="{{ c.model }}">{{ c.model }}</td>
-            <td class="cost num cell-prompt">
+            <td role="cell" class="provider cell-provider" title="{{ c.provider }}">{{ c.provider }}</td>
+            <td role="cell" class="model cell-model" title="{{ c.model }}">{{ c.model }}</td>
+            <td role="cell" class="cost num cell-prompt">
               <span class="cost-amount" data-raw="{{ c.prompt_cost_per_token or 0 }}"></span><span class="cost-unit">/1M</span>
             </td>
-            <td class="cost num cell-completion">
+            <td role="cell" class="cost num cell-completion">
               <span class="cost-amount" data-raw="{{ c.completion_cost_per_token or 0 }}"></span><span class="cost-unit">/1M</span>
             </td>
-            <td class="cell-source">
+            <td class="row-break" role="presentation" aria-hidden="true"></td>
+            <td role="cell" class="cell-source">
               {% set src = c.source or 'unknown' %}
               {% set source_urls = {'litellm': 'https://www.litellm.ai/', 'openrouter': 'https://openrouter.ai/'} %}
+              {% set source_names = {'litellm': 'LiteLLM'} %}
               {% set url = source_urls.get(src) %}
               {% if url %}
-              <a class="source-pill source-{{ src }}" href="{{ url }}" target="_blank" rel="noopener noreferrer"
-                 title="Source: {{ src }} ({{ url }})">{{ src }}</a>
+              <a class="source-link" href="{{ url }}" target="_blank" rel="noopener noreferrer"
+                 title="Source: {{ src }} ({{ url }})"><i class="source-logo source-logo-{{ src }}" aria-hidden="true"></i>{{ source_names.get(src, src) }}</a>
               {% else %}
-              <span class="source-pill source-unknown" title="Source: {{ src }}">{{ src }}</span>
+              <span class="source-link" title="Source: {{ src }}">{{ src }}</span>
               {% endif %}
             </td>
-            <td class="copy-cell">
+            <td role="cell" class="copy-cell">
               <button type="button" class="copy-icon" data-path="/v1/costs/{{ c.provider }}/{{ c.model }}"
-                      aria-label="Copy curl for {{ c.provider }}/{{ c.model }}" title="Copy curl">
-                <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                  <rect x="5" y="2.5" width="8.5" height="10.5" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
-                  <path d="M10.5 13v0.5A1.5 1.5 0 0 1 9 15H4a1.5 1.5 0 0 1-1.5-1.5v-8A1.5 1.5 0 0 1 4 4h0.5" stroke="currentColor" stroke-width="1.3"/>
+                      aria-label="Copy curl for {{ c.provider }}/{{ c.model }}" data-tooltip="Copy curl">
+                <svg viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <path d="M2 4C2 1.79079 3.79079 0 6 0C8.20921 0 10 1.79079 10 4V4.5C10 4.91421 9.66421 5.25 9.25 5.25C8.83579 5.25 8.5 4.91421 8.5 4.5V4C8.5 2.61921 7.38079 1.5 6 1.5C4.61921 1.5 3.5 2.61921 3.5 4V4.5C3.5 4.91421 3.16421 5.25 2.75 5.25C2.33579 5.25 2 4.91421 2 4.5V4Z" fill="currentColor"/>
+                  <path d="M2.75 6.75C3.16421 6.75 3.5 7.08579 3.5 7.5V8C3.5 9.38079 4.61921 10.5 6 10.5C7.38079 10.5 8.5 9.38079 8.5 8V7.5C8.5 7.08579 8.83579 6.75 9.25 6.75C9.66421 6.75 10 7.08579 10 7.5V8C10 10.2092 8.20921 12 6 12C3.79079 12 2 10.2092 2 8V7.5C2 7.08579 2.33579 6.75 2.75 6.75Z" fill="currentColor"/>
+                  <path d="M6.75 3.75C6.75 3.33579 6.41421 3 6 3C5.58579 3 5.25 3.33579 5.25 3.75V8.25C5.25 8.66421 5.58579 9 6 9C6.41421 9 6.75 8.66421 6.75 8.25V3.75Z" fill="currentColor"/>
                 </svg>
               </button>
             </td>
@@ -391,27 +609,56 @@
         </tbody>
       </table>
       <div class="empty-state hidden" id="empty-state">
-        No models match the current filters.
+        <p>No models match the current filters.</p>
         <button type="button" class="clear-link" id="clear-link-empty">Clear filters</button>
       </div>
     </div>
 
-    <div class="pagination" id="pagination">
-      <div class="info"><strong id="page-current">1</strong> / <strong id="page-total">1</strong></div>
-      <div class="buttons">
-        <button type="button" id="page-prev" aria-label="Previous page">← Prev</button>
-        <button type="button" id="page-next" aria-label="Next page">Next →</button>
-      </div>
-    </div>
+    <div id="scroll-sentinel" aria-hidden="true"></div>
+
+    <div class="sr-only" role="status" aria-live="polite" id="copy-status"></div>
   </main>
 
-  <footer class="footer">
-    &copy; 2026 Unbox Inc.
-  </footer>
+  </div>
+  </div>
+
+  <div class="toaster" id="toaster"></div>
 
 <script>
 (function () {
   "use strict";
+
+  // ── Theme toggle ─────────────────────────────────────────────────
+  var root = document.documentElement;
+  var themeToggle = document.getElementById("theme-toggle");
+  function syncToggleState() {
+    var dark = root.getAttribute("data-theme") === "dark";
+    themeToggle.setAttribute("aria-pressed", String(dark));
+  }
+  function setTheme(next, persist) {
+    root.classList.add("theme-switching");
+    root.setAttribute("data-theme", next);
+    syncToggleState();
+    if (persist) {
+      try { localStorage.setItem("openlayer:colorscheme", next); } catch (e) { /* ignore */ }
+    }
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () { root.classList.remove("theme-switching"); });
+    });
+  }
+  syncToggleState();
+  themeToggle.addEventListener("click", function () {
+    setTheme(root.getAttribute("data-theme") === "dark" ? "light" : "dark", true);
+  });
+  // While the preference is 'system', follow live OS scheme changes
+  // (parity with the app's theme provider).
+  var schemeQuery = window.matchMedia("(prefers-color-scheme: dark)");
+  function onSchemeChange(e) {
+    var pref = null;
+    try { pref = localStorage.getItem("openlayer:colorscheme"); } catch (err) { /* ignore */ }
+    if (!pref || pref === "system") setTheme(e.matches ? "dark" : "light", false);
+  }
+  if (schemeQuery.addEventListener) schemeQuery.addEventListener("change", onSchemeChange);
 
   // ── Cost formatting ──────────────────────────────────────────────
   function formatCost(perToken) {
@@ -428,35 +675,33 @@
   });
 
   // ── State ────────────────────────────────────────────────────────
-  var PAGE_SIZE = 50;
+  var CHUNK_SIZE = 50;
   var DEFAULT_SORT = "provider";
   var DEFAULT_DIR = "asc";
+  var SORT_KEYS = ["provider", "model", "prompt", "completion", "source"];
 
   var tbody = document.getElementById("rows");
   var allRows = Array.prototype.slice.call(tbody.querySelectorAll("tr.data-row"));
   var searchInput = document.getElementById("search");
   var providerSelect = document.getElementById("provider-filter");
-  var visibleFromEl = document.getElementById("visible-from");
-  var visibleToEl = document.getElementById("visible-to");
   var visibleCountEl = document.getElementById("visible-count");
   var matchSuffixEl = document.getElementById("match-suffix");
   var clearLink = document.getElementById("clear-link");
   var clearLinkEmpty = document.getElementById("clear-link-empty");
   var emptyState = document.getElementById("empty-state");
   var headers = document.querySelectorAll("thead th.sortable");
-  var pageCurrent = document.getElementById("page-current");
-  var pageTotal = document.getElementById("page-total");
-  var pagePrev = document.getElementById("page-prev");
-  var pageNext = document.getElementById("page-next");
-  var paginationEl = document.getElementById("pagination");
+  var sentinel = document.getElementById("scroll-sentinel");
 
   var state = {
     q: "",
     provider: "",
     sortKey: DEFAULT_SORT,
     sortDir: DEFAULT_DIR,
-    page: 1,
   };
+  // Infinite scroll: how many matching rows are rendered. Grows by
+  // CHUNK_SIZE as the sentinel below the table approaches the viewport.
+  var visibleLimit = CHUNK_SIZE;
+  var matchingTotal = 0;
 
   // Precompute lowercased search index for speed.
   var rowMeta = allRows.map(function (row) {
@@ -480,7 +725,10 @@
     var i = sort.lastIndexOf("-");
     state.sortKey = sort.slice(0, i) || DEFAULT_SORT;
     state.sortDir = sort.slice(i + 1) === "desc" ? "desc" : "asc";
-    state.page = Math.max(1, parseInt(p.get("page") || "1", 10));
+    if (SORT_KEYS.indexOf(state.sortKey) === -1) {
+      state.sortKey = DEFAULT_SORT;
+      state.sortDir = DEFAULT_DIR;
+    }
   }
   function writeState() {
     var p = new URLSearchParams();
@@ -488,9 +736,18 @@
     if (state.provider) p.set("provider", state.provider);
     var sortRepr = state.sortKey + "-" + state.sortDir;
     if (sortRepr !== DEFAULT_SORT + "-" + DEFAULT_DIR) p.set("sort", sortRepr);
-    if (state.page > 1) p.set("page", String(state.page));
     var qs = p.toString();
     history.replaceState(null, "", window.location.pathname + (qs ? "?" + qs : ""));
+  }
+  // Reflect state into the controls; an unknown provider (e.g. a stale
+  // bookmarked URL) falls back to "All providers" instead of desyncing.
+  function syncControls() {
+    searchInput.value = state.q;
+    providerSelect.value = state.provider;
+    if (providerSelect.value !== state.provider) {
+      state.provider = "";
+      providerSelect.value = "";
+    }
   }
 
   // ── Compute the visible (filtered + sorted + paginated) row set ──
@@ -530,44 +787,29 @@
 
   function render() {
     var matching = sortMatching(applyFilters());
-    var total = matching.length;
-    var totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-    if (state.page > totalPages) state.page = totalPages;
+    matchingTotal = matching.length;
+    var shown = Math.min(visibleLimit, matchingTotal);
+    var visibleRows = matching.slice(0, shown).map(function (m) { return m.row; });
+    var visibleRowSet = new Set(visibleRows);
 
-    var start = (state.page - 1) * PAGE_SIZE;
-    var end = Math.min(total, start + PAGE_SIZE);
-    var pageRows = matching.slice(start, end).map(function (m) { return m.row; });
-    var pageRowSet = new Set(pageRows);
-
-    // Single pass: detach all rows from tbody, then re-append page rows in order.
-    // This keeps the DOM small (only ~50 rows attached at a time) → snappy paint.
+    // Re-append the visible rows in order (moving them to the end of tbody)
+    // and hide the rest. All rows stay in the DOM; only the visible slice paints.
     var frag = document.createDocumentFragment();
-    pageRows.forEach(function (row) {
+    visibleRows.forEach(function (row) {
       row.classList.remove("hidden");
       frag.appendChild(row);
     });
-    // Hide any rows still attached but not on this page.
     allRows.forEach(function (row) {
-      if (!pageRowSet.has(row) && row.parentNode === tbody) {
-        row.classList.add("hidden");
-      }
+      if (!visibleRowSet.has(row)) row.classList.add("hidden");
     });
     tbody.appendChild(frag);
 
     // Result count text
-    visibleCountEl.textContent = total.toLocaleString();
-    if (total === 0) {
-      visibleFromEl.textContent = "0";
-      visibleToEl.textContent = "0";
-    } else {
-      visibleFromEl.textContent = (start + 1).toLocaleString();
-      visibleToEl.textContent = end.toLocaleString();
-    }
+    visibleCountEl.textContent = matchingTotal.toLocaleString();
     var hasFilters = !!(state.q || state.provider);
     matchSuffixEl.textContent = hasFilters ? " matching models" : " models";
     clearLink.classList.toggle("hidden", !hasFilters);
-    emptyState.classList.toggle("hidden", total !== 0);
-    paginationEl.style.display = totalPages > 1 ? "" : "none";
+    emptyState.classList.toggle("hidden", matchingTotal !== 0);
 
     // Sort indicators
     headers.forEach(function (h) {
@@ -577,12 +819,6 @@
         key === state.sortKey ? (state.sortDir === "desc" ? "descending" : "ascending") : "none",
       );
     });
-
-    // Pagination controls
-    pageCurrent.textContent = state.page.toLocaleString();
-    pageTotal.textContent = totalPages.toLocaleString();
-    pagePrev.disabled = state.page <= 1;
-    pageNext.disabled = state.page >= totalPages;
   }
 
   // ── Event handlers ───────────────────────────────────────────────
@@ -597,20 +833,22 @@
 
   searchInput.addEventListener("input", debounce(function () {
     state.q = searchInput.value;
-    state.page = 1;
+    visibleLimit = CHUNK_SIZE;
     writeState();
     render();
+    fillViewport();
   }, 80));
 
   providerSelect.addEventListener("change", function () {
     state.provider = providerSelect.value;
-    state.page = 1;
+    visibleLimit = CHUNK_SIZE;
     writeState();
     render();
+    fillViewport();
   });
 
   headers.forEach(function (h) {
-    h.addEventListener("click", function () {
+    h.querySelector(".th-btn").addEventListener("click", function () {
       var key = h.dataset.sort;
       if (state.sortKey === key) {
         state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
@@ -618,9 +856,10 @@
         state.sortKey = key;
         state.sortDir = "asc";
       }
-      state.page = 1;
+      visibleLimit = CHUNK_SIZE;
       writeState();
       render();
+      fillViewport();
     });
   });
 
@@ -629,55 +868,126 @@
     state.provider = "";
     state.sortKey = DEFAULT_SORT;
     state.sortDir = DEFAULT_DIR;
-    state.page = 1;
+    visibleLimit = CHUNK_SIZE;
     searchInput.value = "";
     providerSelect.value = "";
     writeState();
     render();
+    fillViewport();
     searchInput.focus();
   }
   clearLink.addEventListener("click", clearAll);
   if (clearLinkEmpty) clearLinkEmpty.addEventListener("click", clearAll);
 
-  pagePrev.addEventListener("click", function () {
-    if (state.page > 1) { state.page--; writeState(); render(); window.scrollTo({ top: 0, behavior: "smooth" }); }
-  });
-  pageNext.addEventListener("click", function () {
-    state.page++; writeState(); render(); window.scrollTo({ top: 0, behavior: "smooth" });
-  });
+  // ── Infinite scroll ──────────────────────────────────────────────
+  // Grow the rendered slice while the sentinel below the table sits within
+  // the prefetch range. Checked on scroll/resize and after every re-render,
+  // so it keeps loading until the sentinel is pushed out of range.
+  var PREFETCH_PX = 600;
+  function fillViewport() {
+    var guard = 0;
+    while (
+      visibleLimit < matchingTotal &&
+      sentinel.getBoundingClientRect().top < window.innerHeight + PREFETCH_PX &&
+      guard++ < 100
+    ) {
+      visibleLimit += CHUNK_SIZE;
+      render();
+    }
+  }
+  document.getElementById("canvas-scroll").addEventListener("scroll", fillViewport, { passive: true });
+  window.addEventListener("resize", fillViewport, { passive: true });
+
+  // ── Toasts (sonner-style, like the app's Toast.tsx) ─────────────
+  var toaster = document.getElementById("toaster");
+  function showToast(opts) {
+    var toast = document.createElement("div");
+    toast.className = "toast";
+    var left = document.createElement("div");
+    left.className = "toast-left";
+    var sign = document.createElement("div");
+    sign.className = "toast-sign toast-sign-" + (opts.variant || "success");
+    var text = document.createElement("div");
+    text.className = "toast-text";
+    var title = document.createElement("span");
+    title.className = "toast-title";
+    title.textContent = opts.title;
+    text.appendChild(title);
+    if (opts.description) {
+      var desc = document.createElement("span");
+      desc.className = "toast-desc";
+      desc.textContent = opts.description;
+      text.appendChild(desc);
+    }
+    left.appendChild(sign);
+    left.appendChild(text);
+    var dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.className = "toast-dismiss";
+    dismiss.textContent = "Dismiss";
+    toast.appendChild(left);
+    toast.appendChild(dismiss);
+    toaster.appendChild(toast);
+    setTimeout(function () { toast.classList.add("toast-visible"); }, 10);
+    var removed = false;
+    function remove() {
+      if (removed) return;
+      removed = true;
+      toast.classList.remove("toast-visible");
+      setTimeout(function () { toast.remove(); }, 350);
+    }
+    dismiss.addEventListener("click", remove);
+    setTimeout(remove, 2500);
+  }
 
   // ── Copy-curl ────────────────────────────────────────────────────
   var origin = window.location.origin;
-  var CHECK_SVG = '<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M3.5 8.5l3 3 6-6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  var copyStatus = document.getElementById("copy-status");
+  function writeClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    // Fallback for non-secure origins (e.g. plain-http LAN deployments).
+    return new Promise(function (resolve, reject) {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { /* fall through */ }
+      document.body.removeChild(ta);
+      if (ok) resolve(); else reject(new Error("copy failed"));
+    });
+  }
   tbody.addEventListener("click", function (e) {
     var btn = e.target.closest(".copy-icon");
     if (!btn) return;
-    var url = origin + btn.dataset.path;
-    var originalHTML = btn.innerHTML;
-    var originalTitle = btn.getAttribute("title");
-    navigator.clipboard.writeText("curl " + url).then(function () {
-      btn.innerHTML = CHECK_SVG;
-      btn.style.color = "var(--success)";
-      btn.setAttribute("title", "Copied!");
-      setTimeout(function () {
-        btn.innerHTML = originalHTML;
-        btn.style.color = "";
-        btn.setAttribute("title", originalTitle);
-      }, 1500);
+    var command = "curl " + origin + btn.dataset.path;
+    var model = btn.dataset.path.replace("/v1/costs/", "");
+    writeClipboard(command).then(function () {
+      copyStatus.textContent = "Copied curl command for " + model;
+      showToast({ variant: "success", title: "Copied to clipboard", description: command });
+    }, function () {
+      copyStatus.textContent = "Copy failed for " + model;
+      showToast({ variant: "error", title: "Copy failed", description: "Copy manually: " + command });
     });
   });
 
   // ── Init ─────────────────────────────────────────────────────────
   readState();
-  searchInput.value = state.q;
-  providerSelect.value = state.provider;
+  syncControls();
   render();
+  fillViewport();
 
   window.addEventListener("popstate", function () {
     readState();
-    searchInput.value = state.q;
-    providerSelect.value = state.provider;
+    syncControls();
+    visibleLimit = CHUNK_SIZE;
     render();
+    fillViewport();
   });
 })();
 </script>
