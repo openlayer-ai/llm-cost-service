@@ -298,6 +298,29 @@
   tbody .provider { color: var(--fg-muted); }
   tbody .cost-unit { color: var(--fg-muted); font-size: 11px; margin-left: 2px; }
 
+  /* ── Cached-input hint — hover the prompt cell to reveal the cached token
+     price. Dotted underline signals the affordance; tooltip reuses the
+     copy-button's card styling. ── */
+  tbody td.cell-prompt.has-cached { position: relative; overflow: visible; }
+  tbody td.cell-prompt.has-cached .cost-amount {
+    text-decoration: underline dotted; text-decoration-color: var(--fg-subtle);
+    text-underline-offset: 3px; cursor: help;
+  }
+  tbody td.cell-prompt.has-cached::after {
+    content: attr(data-tooltip);
+    position: absolute; bottom: calc(100% + 6px); right: 8px;
+    padding: 6px 10px;
+    border: 1px solid var(--gray-a4); border-radius: 8px;
+    background: var(--bg);
+    font-size: 12px; font-weight: 500; line-height: 1.4; color: var(--fg);
+    text-align: left; white-space: pre;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    opacity: 0; pointer-events: none; transition: opacity .15s;
+  }
+  /* Paint above the sticky table header (thead th is z-index 5). */
+  tbody td.cell-prompt.has-cached:hover { z-index: 6; }
+  tbody td.cell-prompt.has-cached:hover::after { opacity: 1; transition-delay: .3s; }
+
   /* ── Source — provider logo + plain text ── */
   .source-link {
     display: inline-flex; align-items: center; gap: 6px;
@@ -575,7 +598,7 @@
               data-search="{{ (c.provider ~ ' ' ~ c.model)|lower }}">
             <td role="cell" class="provider cell-provider" title="{{ c.provider }}">{{ c.provider }}</td>
             <td role="cell" class="model cell-model" title="{{ c.model }}">{{ c.model }}</td>
-            <td role="cell" class="cost num cell-prompt">
+            <td role="cell" class="cost num cell-prompt{% if 'cached_tokens' in c.price_details %} has-cached{% endif %}"{% if 'cached_tokens' in c.price_details %} data-cached="{{ c.price_details['cached_tokens'] }}"{% endif %}>
               <span class="cost-amount" data-raw="{{ c.prompt_cost_per_token or 0 }}"></span><span class="cost-unit">/1M</span>
             </td>
             <td role="cell" class="cost num cell-completion">
@@ -672,6 +695,20 @@
   document.querySelectorAll(".cost-amount").forEach(function (el) {
     var raw = parseFloat(el.dataset.raw);
     if (!isNaN(raw)) el.textContent = formatCost(raw);
+  });
+  // Prompt cells with a cached-input price get a hover tooltip comparing the
+  // normal (non-cached) and cached input prices.
+  document.querySelectorAll("td.cell-prompt.has-cached").forEach(function (el) {
+    var cached = parseFloat(el.dataset.cached);
+    var amountEl = el.querySelector(".cost-amount");
+    var normal = amountEl ? parseFloat(amountEl.dataset.raw) : NaN;
+    if (!isNaN(cached) && !isNaN(normal)) {
+      el.setAttribute(
+        "data-tooltip",
+        "Non-cached input: " + formatCost(normal) + "/1M\n" +
+          "Cached input: " + formatCost(cached) + "/1M",
+      );
+    }
   });
 
   // ── State ────────────────────────────────────────────────────────
