@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import distinct, func, select
+from sqlalchemy import delete, distinct, func, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -134,6 +134,39 @@ class LlmCostRepository:
         result = await self.session.execute(stmt)
         await self.session.commit()
         return result.rowcount
+
+    # Rows deleted per statement. Each key is 2 bind params; asyncpg caps a
+    # statement at 32767 params and SQLite (tests) at 32766 by default.
+    _DELETE_CHUNK = 500
+
+    async def delete_missing(
+        self, source: str, keep: set[tuple[str, str]]
+    ) -> int:
+        """Delete ``source`` rows whose (provider, model) is not in ``keep``.
+
+        ``upsert_all`` alone never removes rows, so a model that vanishes from
+        (or is renamed in) a source — or is now rejected by a provider's
+        plausibility guard — would linger forever. Only rows of the given
+        ``source`` are touched, so one source's churn cannot delete another's
+        data. Callers must not prune a source that failed or came back empty.
+        """
+        result = await self.session.execute(
+            select(LlmCost.provider, LlmCost.model).where(LlmCost.source == source)
+        )
+        stale = [(p, m) for p, m in result.all() if (p, m) not in keep]
+        if not stale:
+            return 0
+
+        deleted = 0
+        for i in range(0, len(stale), self._DELETE_CHUNK):
+            chunk = stale[i : i + self._DELETE_CHUNK]
+            stmt = delete(LlmCost).where(
+                LlmCost.source == source,
+                tuple_(LlmCost.provider, LlmCost.model).in_(chunk),
+            )
+            deleted += (await self.session.execute(stmt)).rowcount
+        await self.session.commit()
+        return deleted
 
     async def get_status(self) -> dict:
         # total_models counts distinct (provider, model) so the count reflects

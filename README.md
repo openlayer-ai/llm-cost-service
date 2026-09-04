@@ -81,3 +81,9 @@ FastAPI REST API
 ```
 
 The `CostDataProvider` protocol makes it straightforward to add new cost sources (e.g. scraping provider pricing pages) without touching the rest of the stack.
+
+### Price plausibility guard
+
+Upstream price files contain occasional unit errors (a per-1K or per-1M figure typed into a per-token field), which would otherwise be ingested verbatim and render as e.g. $135,000 per 1M tokens. Every per-token price therefore passes a plausibility ceiling (`MAX_COST_PER_TOKEN`, default `0.001` USD/token = $1,000 per 1M): a base input/output price above it skips the model with a warning, and an implausible granular price (cache, audio) drops just that field. Known-bad LiteLLM rows are corrected via `_LITELLM_PRICE_CORRECTIONS` in `service/costs/providers.py`; each correction applies only while the raw value is still implausible, so it retires itself once upstream is fixed (an INFO log then says the entry can be removed).
+
+Each refresh also deletes rows that vanished from a source that fetched successfully, so renamed or rejected models don't linger.

@@ -16,6 +16,10 @@ class RefreshLlmCostsService:
         duration_ms: float
         per_source: dict[str, int] = field(default_factory=dict)
         failed_sources: list[str] = field(default_factory=list)
+        # Stale rows pruned because they vanished from a source that fetched
+        # successfully this run (renamed upstream, dropped, or now rejected by
+        # a plausibility guard).
+        rows_deleted: int = 0
 
     def __init__(
         self,
@@ -49,12 +53,31 @@ class RefreshLlmCostsService:
             all_entities.extend(entities)
 
         rows_affected = await self.repository.upsert_all(all_entities)
+
+        # Prune rows that disappeared from a source. Grouped by the entities'
+        # own ``source`` so we only ever prune sources that actually returned
+        # data this run: a failed provider is skipped above, and a provider
+        # that returned nothing contributes no key here — either way its
+        # existing rows are left intact rather than wiped by an outage.
+        keep_by_source: dict[str, set[tuple[str, str]]] = {}
+        for entity in all_entities:
+            keep_by_source.setdefault(entity.source, set()).add(
+                (entity.provider, entity.model)
+            )
+        rows_deleted = 0
+        for source_name, keep in keep_by_source.items():
+            deleted = await self.repository.delete_missing(source_name, keep)
+            if deleted:
+                logger.info("Pruned %d stale %s rows", deleted, source_name)
+            rows_deleted += deleted
+
         duration_ms = (time.monotonic() - start) * 1000
         return self.Response(
             rows_affected=rows_affected,
             duration_ms=duration_ms,
             per_source=per_source,
             failed_sources=failed_sources,
+            rows_deleted=rows_deleted,
         )
 
 

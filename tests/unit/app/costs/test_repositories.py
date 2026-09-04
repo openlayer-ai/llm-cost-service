@@ -237,3 +237,48 @@ class TestResolvedReads:
         status = await repository.get_status()
         assert status["total_models"] == 2
         assert status["total_providers"] == 1
+
+
+class TestDeleteMissing:
+    async def test_deletes_rows_not_in_keep_set(self, repository, openai_entity, anthropic_entity):
+        await repository.upsert_all([openai_entity, anthropic_entity])
+        deleted = await repository.delete_missing("litellm", {("openai", "gpt-4o")})
+        assert deleted == 1
+        remaining = {(e.provider, e.model) for e in await repository.list_all(resolved=False)}
+        assert remaining == {("openai", "gpt-4o")}
+
+    async def test_only_touches_given_source(self, repository, openai_entity):
+        other = LlmCostEntity("openai", "gpt-4o", 2e-6, 8e-6, "openrouter")
+        await repository.upsert_all([openai_entity, other])
+        # Keep nothing from litellm: its row goes, the openrouter twin stays.
+        deleted = await repository.delete_missing("litellm", set())
+        assert deleted == 1
+        remaining = await repository.list_all(resolved=False)
+        assert [(e.provider, e.model, e.source) for e in remaining] == [("openai", "gpt-4o", "openrouter")]
+
+    async def test_returns_zero_when_nothing_is_stale(self, repository, openai_entity):
+        await repository.upsert_all([openai_entity])
+        assert await repository.delete_missing("litellm", {("openai", "gpt-4o")}) == 0
+
+    async def test_returns_zero_on_empty_table(self, repository):
+        assert await repository.delete_missing("litellm", {("openai", "gpt-4o")}) == 0
+
+    async def test_clears_legacy_prefixed_duplicates(self, repository):
+        # The situation from the audit: a stale "wandb/<model>" row alongside
+        # the current stripped name. A refresh that emits only the stripped
+        # name prunes the prefixed leftover.
+        stale = LlmCostEntity("wandb", "wandb/deepseek-ai/DeepSeek-R1-0528", 0.135, 0.54, "litellm")
+        fresh = LlmCostEntity("wandb", "deepseek-ai/DeepSeek-R1-0528", 1.35e-6, 5.4e-6, "litellm")
+        await repository.upsert_all([stale, fresh])
+        deleted = await repository.delete_missing("litellm", {("wandb", "deepseek-ai/DeepSeek-R1-0528")})
+        assert deleted == 1
+        rows = await repository.list_by_provider("wandb", resolved=False)
+        assert [e.model for e in rows] == ["deepseek-ai/DeepSeek-R1-0528"]
+
+    async def test_chunks_large_deletes(self, repository, monkeypatch):
+        monkeypatch.setattr(LlmCostRepository, "_DELETE_CHUNK", 3)
+        rows = [LlmCostEntity("p", f"m{i}", 1e-6, 1e-6, "litellm") for i in range(10)]
+        await repository.upsert_all(rows)
+        deleted = await repository.delete_missing("litellm", {("p", "m0")})
+        assert deleted == 9
+        assert [e.model for e in await repository.list_all(resolved=False)] == ["m0"]

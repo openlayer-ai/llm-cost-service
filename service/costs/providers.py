@@ -1,6 +1,54 @@
+import logging
 from typing import Protocol
 
 from service.costs.entities import LlmCostEntity
+
+logger = logging.getLogger(__name__)
+
+# Plausibility ceiling for any per-token price, in USD per token. The most
+# expensive real model in LiteLLM's data today is o1-pro at $0.0006/token
+# ($600 per 1M) output; the known-bad upstream rows start at $0.0032/token
+# ($3,200 per 1M) and run up to $0.54/token. A price above this ceiling is a
+# data-entry error (typically a per-1K or per-1M figure typed into a per-token
+# field), never a real list price. Overridable via ``MAX_COST_PER_TOKEN`` so a
+# legitimately pricier model can be admitted without a code change.
+DEFAULT_MAX_COST_PER_TOKEN: float = 0.001  # == $1,000 per 1M tokens
+
+# Known-bad LiteLLM rows, keyed by the RAW LiteLLM key (before provider-prefix
+# stripping) -> divisor that recovers the vendor's list price. W&B Inference
+# rows were entered with the per-1M price / 10 in the per-token field (so they
+# render 100,000x too high); azure_ai/jais-30b-chat and the two watsonx rows
+# carry the per-1K price (1,000x too high; e.g. mt0-xxl-13b is $0.50 / $2.00
+# per 1M, LiteLLM has 0.0005 / 0.002 per token). Verified against litellm
+# 1.99.0 — rows that release already fixed are not listed.
+#
+# A correction is applied ONLY while the row is still broken — i.e. at least
+# one of its base input/output prices is implausible (above the ceiling). It
+# then applies to EVERY price field of the row, since a units error is a
+# property of the row, not of one field (watsonx input sits at 0.0005, just
+# under the ceiling, and would otherwise be left 1,000x too high). That makes
+# the table self-retiring: once upstream fixes a row, both raw values pass the
+# ceiling and the divisor is never applied — dividing an already-correct value
+# would make it 100,000x too LOW. An INFO log then says the entry can be
+# deleted from this table.
+_LITELLM_PRICE_CORRECTIONS: dict[str, float] = {
+    "wandb/deepseek-ai/DeepSeek-R1-0528": 100_000,
+    "wandb/deepseek-ai/DeepSeek-V3-0324": 100_000,
+    "wandb/Qwen/Qwen3-235B-A22B-Instruct-2507": 100_000,
+    "wandb/Qwen/Qwen3-235B-A22B-Thinking-2507": 100_000,
+    "wandb/meta-llama/Llama-4-Scout-17B-16E-Instruct": 100_000,
+    "wandb/zai-org/GLM-4.5": 100_000,
+    "wandb/microsoft/Phi-4-mini-instruct": 100_000,
+    "azure_ai/jais-30b-chat": 1_000,
+    "watsonx/core42/jais-13b-chat": 1_000,
+    "watsonx/bigscience/mt0-xxl-13b": 1_000,
+}
+
+
+def _is_plausible(price: float, ceiling: float) -> bool:
+    """True when ``price`` is a sane per-token USD figure (0 <= price <= ceiling)."""
+    return 0 <= price <= ceiling
+
 
 # Canonical per-category price keys — a contract shared with the SDK's
 # ``usageDetails`` and the platform cost engine (keys are matched by name).
@@ -40,14 +88,32 @@ def _coerce_price(value: object) -> float | None:
 
 
 def _build_price_details(
-    source: dict, field_map: dict[str, str]
+    source: dict,
+    field_map: dict[str, str],
+    ceiling: float = DEFAULT_MAX_COST_PER_TOKEN,
+    label: str = "",
+    divisor: float = 1.0,
 ) -> dict[str, float]:
-    """Map a provider entry's per-category cost fields to canonical price keys."""
+    """Map a provider entry's per-category cost fields to canonical price keys.
+
+    A field whose (corrected) value is above ``ceiling`` is dropped with a
+    warning rather than sinking the whole entry — the base input/output price
+    is still usable on its own. ``divisor`` is the known-bad correction the
+    caller has decided applies to this whole entry (1.0 when none).
+    """
     details: dict[str, float] = {}
     for canonical, field in field_map.items():
         price = _coerce_price(source.get(field))
-        if price is not None:
-            details[canonical] = price
+        if price is None:
+            continue
+        price = price / divisor
+        if not _is_plausible(price, ceiling):
+            logger.warning(
+                "Dropping implausible %s price for %s: %s=%r (ceiling %r/token)",
+                canonical, label or "<unknown>", field, price, ceiling,
+            )
+            continue
+        details[canonical] = price
     return details
 
 
@@ -124,6 +190,29 @@ class LiteLLMCostProvider:
     # model. Drop it so it doesn't pollute the table.
     _SKIP_MODELS = frozenset({"sample_spec"})
 
+    def __init__(self, max_cost_per_token: float = DEFAULT_MAX_COST_PER_TOKEN) -> None:
+        self.max_cost_per_token = max_cost_per_token
+
+    def _correction_divisor(self, model_key: str, input_cost: float, output_cost: float) -> float:
+        """Divisor to apply to every price field of ``model_key`` (1.0 = none).
+
+        Only fires while the row is still broken (a base price above the
+        ceiling), so a row upstream has already fixed passes through untouched
+        and is reported as such.
+        """
+        divisor = _LITELLM_PRICE_CORRECTIONS.get(model_key)
+        if divisor is None:
+            return 1.0
+        ceiling = self.max_cost_per_token
+        if _is_plausible(input_cost, ceiling) and _is_plausible(output_cost, ceiling):
+            logger.info(
+                "LiteLLM %s (input=%r output=%r) is already plausible; correction (/%s) "
+                "no longer needed — drop it from _LITELLM_PRICE_CORRECTIONS",
+                model_key, input_cost, output_cost, divisor,
+            )
+            return 1.0
+        return divisor
+
     @staticmethod
     def _strip_provider_prefix(model_key: str, provider: str) -> str:
         """Drop a single leading ``<provider>/`` segment from a model key.
@@ -155,6 +244,18 @@ class LiteLLMCostProvider:
             if input_cost is None or output_cost is None or not provider:
                 continue
 
+            divisor = self._correction_divisor(model_key, input_cost, output_cost)
+            input_cost = input_cost / divisor
+            output_cost = output_cost / divisor
+            ceiling = self.max_cost_per_token
+            if not (_is_plausible(input_cost, ceiling) and _is_plausible(output_cost, ceiling)):
+                logger.warning(
+                    "Skipping LiteLLM %s: implausible price input=%r output=%r "
+                    "(ceiling %r/token)",
+                    model_key, input_cost, output_cost, ceiling,
+                )
+                continue
+
             model = self._strip_provider_prefix(model_key, provider)
             was_prefixed = model != model_key
             key = (provider, model)
@@ -171,7 +272,13 @@ class LiteLLMCostProvider:
                     model=model,
                     prompt_cost_per_token=input_cost,
                     completion_cost_per_token=output_cost,
-                    price_details=_build_price_details(entry, _LITELLM_PRICE_FIELDS),
+                    price_details=_build_price_details(
+                        entry,
+                        _LITELLM_PRICE_FIELDS,
+                        ceiling=ceiling,
+                        label=f"litellm:{model_key}",
+                        divisor=divisor,
+                    ),
                     is_chat_capable=_litellm_is_chat_capable(entry),
                     source="litellm",
                 ),
@@ -201,9 +308,11 @@ class OpenRouterCostProvider:
         self,
         base_url: str = DEFAULT_BASE_URL,
         timeout_seconds: float = 30.0,
+        max_cost_per_token: float = DEFAULT_MAX_COST_PER_TOKEN,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self.max_cost_per_token = max_cost_per_token
 
     def fetch_costs(self) -> list[LlmCostEntity]:
         import httpx  # noqa: PLC0415
@@ -238,6 +347,15 @@ class OpenRouterCostProvider:
             except (TypeError, ValueError):
                 continue
 
+            ceiling = self.max_cost_per_token
+            if not (_is_plausible(prompt_cost, ceiling) and _is_plausible(completion_cost, ceiling)):
+                logger.warning(
+                    "Skipping OpenRouter %s: implausible price prompt=%r completion=%r "
+                    "(ceiling %r/token)",
+                    model_id, prompt_cost, completion_cost, ceiling,
+                )
+                continue
+
             costs.append(
                 LlmCostEntity(
                     provider=provider,
@@ -245,7 +363,10 @@ class OpenRouterCostProvider:
                     prompt_cost_per_token=prompt_cost,
                     completion_cost_per_token=completion_cost,
                     price_details=_build_price_details(
-                        pricing, _OPENROUTER_PRICE_FIELDS
+                        pricing,
+                        _OPENROUTER_PRICE_FIELDS,
+                        ceiling=ceiling,
+                        label=f"openrouter:{model_id}",
                     ),
                     is_chat_capable=_openrouter_is_chat_capable(entry),
                     source="openrouter",

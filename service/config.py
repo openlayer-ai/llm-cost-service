@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     cron_secret: str | None = (
         None  # CRON_SECRET — required to call POST /v1/costs/refresh when set
     )
+    # MAX_COST_PER_TOKEN — plausibility ceiling (USD per token) above which a
+    # source's price is treated as a data-entry error and skipped. Default
+    # $0.001/token == $1,000 per 1M; see costs/providers.py for the rationale.
+    max_cost_per_token: float = 0.001
 
     @field_validator("database_url", mode="after")
     @classmethod
