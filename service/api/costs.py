@@ -24,7 +24,11 @@ _READ_CACHE = "public, max-age=3600"
 
 
 def _build_providers() -> list:
-    return [LiteLLMCostProvider(), OpenRouterCostProvider()]
+    ceiling = get_settings().max_cost_per_token
+    return [
+        LiteLLMCostProvider(max_cost_per_token=ceiling),
+        OpenRouterCostProvider(max_cost_per_token=ceiling),
+    ]
 
 
 def _to_schema(entity: LlmCostEntity) -> LlmCostSchema:
@@ -104,6 +108,7 @@ async def refresh_costs(
     result = await RefreshLlmCostsService(_build_providers(), repository).execute()
     return RefreshResponse(
         rows_affected=result.rows_affected,
+        rows_deleted=result.rows_deleted,
         duration_ms=result.duration_ms,
         per_source=result.per_source,
         failed_sources=result.failed_sources,

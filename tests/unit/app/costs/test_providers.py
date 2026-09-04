@@ -453,3 +453,215 @@ class TestOpenRouterIsChatCapableHelper:
     )
     def test_classifies_from_output_modalities(self, entry, expected):
         assert _openrouter_is_chat_capable(entry) is expected
+
+
+# --- Plausibility guard + known-bad corrections --------------------------------
+
+from service.costs.providers import (  # noqa: E402
+    DEFAULT_MAX_COST_PER_TOKEN,
+    _LITELLM_PRICE_CORRECTIONS,
+    _is_plausible,
+)
+
+
+class TestIsPlausible:
+    @pytest.mark.parametrize("price", [0, 1e-6, 6e-4, DEFAULT_MAX_COST_PER_TOKEN])
+    def test_accepts_prices_up_to_ceiling(self, price):
+        assert _is_plausible(price, DEFAULT_MAX_COST_PER_TOKEN)
+
+    @pytest.mark.parametrize("price", [0.0032, 0.135, 0.54, -1e-6])
+    def test_rejects_above_ceiling_or_negative(self, price):
+        assert not _is_plausible(price, DEFAULT_MAX_COST_PER_TOKEN)
+
+
+class TestLiteLLMPlausibilityGuard:
+    def test_skips_entry_with_implausible_input_price(self, caplog):
+        # An unknown key (not in the corrections table) that is 1000x off.
+        fake = {"someprovider/model": _entry(litellm_provider="someprovider", input_cost_per_token=0.005)}
+        with patch("litellm.model_cost", fake), caplog.at_level("WARNING"):
+            result = LiteLLMCostProvider().fetch_costs()
+        assert result == []
+        assert "implausible" in caplog.text
+        assert "someprovider/model" in caplog.text
+
+    def test_skips_entry_with_implausible_output_price(self):
+        fake = {"m": _entry(output_cost_per_token=0.54)}
+        with patch("litellm.model_cost", fake):
+            assert LiteLLMCostProvider().fetch_costs() == []
+
+    def test_ceiling_is_configurable(self):
+        fake = {"m": _entry(input_cost_per_token=0.002, output_cost_per_token=0.002)}
+        with patch("litellm.model_cost", fake):
+            assert LiteLLMCostProvider().fetch_costs() == []
+            assert len(LiteLLMCostProvider(max_cost_per_token=0.002).fetch_costs()) == 1
+
+    def test_keeps_most_expensive_real_model(self):
+        # o1-pro: $150 / $600 per 1M — the priciest legitimate row must survive.
+        fake = {"o1-pro": _entry(input_cost_per_token=1.5e-4, output_cost_per_token=6e-4)}
+        with patch("litellm.model_cost", fake):
+            e = LiteLLMCostProvider().fetch_costs()[0]
+        assert e.completion_cost_per_token == 6e-4
+
+    def test_implausible_price_detail_is_dropped_but_entry_kept(self, caplog):
+        fake = {
+            "gpt-4o": _entry(
+                cache_read_input_token_cost=1.25e-6,
+                input_cost_per_audio_token=0.04,  # per-1K figure in a per-token field
+            )
+        }
+        with patch("litellm.model_cost", fake), caplog.at_level("WARNING"):
+            result = LiteLLMCostProvider().fetch_costs()
+        assert len(result) == 1
+        assert result[0].price_details == {"cached_tokens": 1.25e-6}
+        assert "audio_input_tokens" in caplog.text
+
+    def test_known_bad_wandb_row_is_corrected(self):
+        # Real values from litellm 1.84.0: per-1M price / 10 in the per-token field.
+        fake = {
+            "wandb/deepseek-ai/DeepSeek-R1-0528": _entry(
+                litellm_provider="wandb", input_cost_per_token=0.135, output_cost_per_token=0.54
+            )
+        }
+        with patch("litellm.model_cost", fake):
+            result = LiteLLMCostProvider().fetch_costs()
+        assert len(result) == 1
+        e = result[0]
+        assert (e.provider, e.model) == ("wandb", "deepseek-ai/DeepSeek-R1-0528")
+        assert e.prompt_cost_per_token == pytest.approx(1.35e-6)  # $1.35 per 1M
+        assert e.completion_cost_per_token == pytest.approx(5.4e-6)  # $5.40 per 1M
+
+    def test_known_bad_jais_row_is_corrected(self):
+        fake = {
+            "azure_ai/jais-30b-chat": _entry(
+                litellm_provider="azure_ai", input_cost_per_token=0.0032, output_cost_per_token=0.00971
+            )
+        }
+        with patch("litellm.model_cost", fake):
+            e = LiteLLMCostProvider().fetch_costs()[0]
+        assert e.prompt_cost_per_token == pytest.approx(3.2e-6)
+        assert e.completion_cost_per_token == pytest.approx(9.71e-6)
+
+    def test_correction_not_applied_once_upstream_is_fixed(self, caplog):
+        # Self-retiring: a plausible raw value passes through untouched (dividing
+        # it again would make it 100,000x too low) and we log that the table
+        # entry is obsolete.
+        fake = {
+            "wandb/microsoft/Phi-4-mini-instruct": _entry(
+                litellm_provider="wandb", input_cost_per_token=8e-8, output_cost_per_token=3.5e-7
+            )
+        }
+        with patch("litellm.model_cost", fake), caplog.at_level("INFO"):
+            e = LiteLLMCostProvider().fetch_costs()[0]
+        assert e.prompt_cost_per_token == 8e-8
+        assert e.completion_cost_per_token == 3.5e-7
+        assert "no longer needed" in caplog.text
+
+    def test_correction_applies_to_whole_row_when_any_base_price_is_implausible(self):
+        # The watsonx shape: input (0.0005) squeaks under the ceiling but output
+        # (0.002) doesn't. The units error is a property of the row, so both
+        # fields — and any granular extras — are divided together.
+        fake = {
+            "watsonx/core42/jais-13b-chat": _entry(
+                litellm_provider="watsonx",
+                input_cost_per_token=0.0005,
+                output_cost_per_token=0.002,
+                cache_read_input_token_cost=0.00025,
+            )
+        }
+        with patch("litellm.model_cost", fake):
+            e = LiteLLMCostProvider().fetch_costs()[0]
+        assert e.prompt_cost_per_token == pytest.approx(5e-7)
+        assert e.completion_cost_per_token == pytest.approx(2e-6)
+        assert e.price_details == {"cached_tokens": pytest.approx(2.5e-7)}
+
+    def test_corrected_entry_still_skipped_if_still_implausible(self):
+        # Wrong divisor for the magnitude of the error -> guard still catches it.
+        fake = {"azure_ai/jais-30b-chat": _entry(litellm_provider="azure_ai", input_cost_per_token=50.0, output_cost_per_token=50.0)}
+        with patch("litellm.model_cost", fake):
+            assert LiteLLMCostProvider().fetch_costs() == []
+
+    def test_correction_table_only_targets_known_bad_sources(self):
+        assert all(
+            k.startswith(("wandb/", "azure_ai/jais", "watsonx/")) for k in _LITELLM_PRICE_CORRECTIONS
+        )
+
+    def test_known_bad_watsonx_row_is_corrected(self):
+        fake = {
+            "watsonx/bigscience/mt0-xxl-13b": _entry(
+                litellm_provider="watsonx", input_cost_per_token=0.0005, output_cost_per_token=0.002
+            )
+        }
+        with patch("litellm.model_cost", fake):
+            e = LiteLLMCostProvider().fetch_costs()[0]
+        assert e.prompt_cost_per_token == pytest.approx(5e-7)  # $0.50 per 1M
+        assert e.completion_cost_per_token == pytest.approx(2e-6)  # $2.00 per 1M
+
+
+class TestOpenRouterPlausibilityGuard:
+    def test_skips_entry_with_implausible_price(self, caplog):
+        payload = {"data": [_or_entry("vendor/model", "0.135", "0.54")]}
+        httpx_mod, _ = _stub_httpx(payload)
+        with patch.dict("sys.modules", {"httpx": httpx_mod}), caplog.at_level("WARNING"):
+            result = OpenRouterCostProvider().fetch_costs()
+        assert result == []
+        assert "vendor/model" in caplog.text
+
+    def test_ceiling_is_configurable(self):
+        payload = {"data": [_or_entry("vendor/model", "0.002", "0.002")]}
+        httpx_mod, _ = _stub_httpx(payload)
+        with patch.dict("sys.modules", {"httpx": httpx_mod}):
+            assert OpenRouterCostProvider().fetch_costs() == []
+            assert len(OpenRouterCostProvider(max_cost_per_token=0.002).fetch_costs()) == 1
+
+    def test_implausible_price_detail_is_dropped_but_entry_kept(self):
+        payload = {"data": [_or_entry("anthropic/claude-x", "5e-6", "25e-6", input_cache_read="0.5")]}
+        httpx_mod, _ = _stub_httpx(payload)
+        with patch.dict("sys.modules", {"httpx": httpx_mod}):
+            result = OpenRouterCostProvider().fetch_costs()
+        assert len(result) == 1
+        assert result[0].price_details == {}
+
+
+class TestLiteLLMBundledDataCanary:
+    """Runs against the REAL bundled LiteLLM price file (no network).
+
+    Fails CI when a pin bump introduces a new implausible row that the guard
+    has to drop, or when a known-bad row stops resolving to a sane price — so
+    the corrections table and the pin move together deliberately.
+    """
+
+    @pytest.fixture(scope="class")
+    def entities(self):
+        return LiteLLMCostProvider().fetch_costs()
+
+    def test_no_emitted_price_exceeds_ceiling(self, entities):
+        ceiling = DEFAULT_MAX_COST_PER_TOKEN
+        offenders = [
+            (e.provider, e.model, e.prompt_cost_per_token, e.completion_cost_per_token)
+            for e in entities
+            if e.prompt_cost_per_token > ceiling or e.completion_cost_per_token > ceiling
+            or any(v > ceiling for v in e.price_details.values())
+        ]
+        assert offenders == []
+
+    def test_wandb_models_are_priced_sanely(self, entities):
+        # W&B Inference list prices are all well under $10 per 1M tokens.
+        wandb = [e for e in entities if e.provider == "wandb"]
+        assert wandb, "expected wandb rows in the bundled data"
+        too_high = [
+            (e.model, e.prompt_cost_per_token * 1e6, e.completion_cost_per_token * 1e6)
+            for e in wandb
+            if e.prompt_cost_per_token > 10e-6 or e.completion_cost_per_token > 10e-6
+        ]
+        assert too_high == []
+
+    def test_guard_drops_nothing_from_bundled_data(self, caplog):
+        # Every implausible row should be handled by a correction, not silently
+        # dropped. If this fails, either add the row to the corrections table
+        # or (if it's truly unpriceable) accept the drop and update this test.
+        import litellm
+
+        with caplog.at_level("WARNING", logger="service.costs.providers"):
+            LiteLLMCostProvider().fetch_costs()
+        skipped = [r for r in caplog.records if "Skipping LiteLLM" in r.getMessage()]
+        assert [r.getMessage() for r in skipped] == [], f"litellm={getattr(litellm, '__version__', '?')}"

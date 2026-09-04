@@ -34,6 +34,9 @@ class _RepositoryStub:
         self.list_all_calls = 0
         self.list_by_provider_calls: list[str] = []
         self.upserted: list[LlmCostEntity] = []
+        self.pruned: list[tuple[str, set]] = []
+        # Pretend this many stale rows exist per source, for delete_missing.
+        self.stale_per_source: dict[str, int] = {}
 
     async def get(self, *, provider, model, source=None):
         self.get_calls.append({"provider": provider, "model": model, "source": source})
@@ -50,6 +53,10 @@ class _RepositoryStub:
     async def upsert_all(self, entities):
         self.upserted = entities
         return len(entities)
+
+    async def delete_missing(self, source, keep):
+        self.pruned.append((source, set(keep)))
+        return self.stale_per_source.get(source, 0)
 
 
 class _ProviderStub:
@@ -113,6 +120,41 @@ class TestRefreshLlmCostsService:
         repo = _RepositoryStub()
         with pytest.raises(ValueError):
             RefreshLlmCostsService([], cast(LlmCostRepository, repo))
+
+    async def test_prunes_stale_rows_per_successful_source(self):
+        litellm_costs = [_entity(source="litellm"), _entity(model="gpt-4o-mini", source="litellm")]
+        openrouter_costs = [_entity(provider="anthropic", model="claude-opus-4.7", source="openrouter")]
+        repo = _RepositoryStub()
+        repo.stale_per_source = {"litellm": 3, "openrouter": 1}
+        response = await RefreshLlmCostsService(
+            [_ProviderStub(litellm_costs), _ProviderStub(openrouter_costs)],
+            cast(LlmCostRepository, repo),
+        ).execute()
+        assert response.rows_deleted == 4
+        assert dict(repo.pruned) == {
+            "litellm": {("openai", "gpt-4o"), ("openai", "gpt-4o-mini")},
+            "openrouter": {("anthropic", "claude-opus-4.7")},
+        }
+
+    async def test_does_not_prune_failed_source(self):
+        # An outage on one source must not wipe its existing rows.
+        repo = _RepositoryStub()
+        repo.stale_per_source = {"litellm": 2, "openrouter": 99}
+        response = await RefreshLlmCostsService(
+            [_ProviderStub([_entity(source="litellm")]), _FailingProvider()],
+            cast(LlmCostRepository, repo),
+        ).execute()
+        assert [s for s, _ in repo.pruned] == ["litellm"]
+        assert response.rows_deleted == 2
+
+    async def test_does_not_prune_source_that_returned_nothing(self):
+        repo = _RepositoryStub()
+        repo.stale_per_source = {"litellm": 99}
+        response = await RefreshLlmCostsService(
+            [_ProviderStub([])], cast(LlmCostRepository, repo)
+        ).execute()
+        assert repo.pruned == []
+        assert response.rows_deleted == 0
 
 
 class TestGetLlmCostService:

@@ -22,6 +22,7 @@ class ListCostsResponse(BaseModel):
 
 class RefreshResponse(BaseModel):
     rows_affected: int
+    rows_deleted: int = 0
     duration_ms: float
     per_source: dict[str, int] = {}
     failed_sources: list[str] = []
