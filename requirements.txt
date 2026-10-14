@@ -8,3 +8,7 @@ apscheduler>=3.10
 litellm==1.99.0
 jinja2>=3.1
 httpx>=0.27
+# Transitive (litellm -> tokenizers -> huggingface-hub). Floors keep fresh
+# installs on releases with the 2.10-2.12 security fixes.
+httpx2>=2.12.0
+httpcore2>=2.10.0
