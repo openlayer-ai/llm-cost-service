@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest_asyncio
+from sqlalchemy import event
 
 from service.costs.entities import LlmCostEntity
 from service.costs.repositories import LlmCostRepository
@@ -166,6 +167,48 @@ class TestUpsertAll:
         assert count == 1
         result = await repository.get(provider="azure", model="computer-use-preview")
         assert result.prompt_cost_per_token == 3e-6
+
+    async def test_no_statement_exceeds_asyncpg_bind_param_cap(self, repository, engine):
+        # 8 bind params per row: 4,096 rows is 32,768 params, over asyncpg's
+        # 32,767 cap. A single unbatched INSERT failed in prod (the Oct 31 2026
+        # refresh outage). SQLite builds vary (some allow 250,000 params), so
+        # assert on the params sent per statement rather than on an error.
+        asyncpg_max_params = 32_767
+        param_counts: list[int] = []
+
+        def record(conn, cursor, statement, parameters, context, executemany):
+            param_counts.append(len(parameters))
+
+        event.listen(engine.sync_engine, "before_cursor_execute", record)
+        try:
+            rows = [LlmCostEntity("p", f"m{i}", 1e-6, 2e-6, "litellm") for i in range(4_100)]
+            count = await repository.upsert_all(rows)
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", record)
+
+        assert count == 4_100
+        assert param_counts and max(param_counts) <= asyncpg_max_params
+        assert len(await repository.list_all(resolved=False)) == 4_100
+
+    async def test_chunks_large_upserts(self, repository, monkeypatch):
+        monkeypatch.setattr(LlmCostRepository, "_UPSERT_CHUNK", 3)
+        rows = [LlmCostEntity("p", f"m{i}", 1e-6, 2e-6, "litellm") for i in range(10)]
+        assert await repository.upsert_all(rows) == 10
+        # Second pass hits ON CONFLICT in every chunk and updates in place.
+        updated = [LlmCostEntity("p", f"m{i}", 5e-6, 6e-6, "litellm") for i in range(10)]
+        assert await repository.upsert_all(updated) == 10
+        stored = await repository.list_all(resolved=False)
+        assert len(stored) == 10
+        assert {e.prompt_cost_per_token for e in stored} == {5e-6}
+
+    async def test_chunks_share_one_timestamp(self, repository, monkeypatch):
+        # last_refreshed_at is max(updated_at); every row of one refresh
+        # should carry the same stamp regardless of how it was batched.
+        monkeypatch.setattr(LlmCostRepository, "_UPSERT_CHUNK", 2)
+        rows = [LlmCostEntity("p", f"m{i}", 1e-6, 2e-6, "litellm") for i in range(5)]
+        await repository.upsert_all(rows)
+        stored = await repository.list_all(resolved=False)
+        assert len({e.updated_at for e in stored}) == 1
 
 
 class TestResolvedReads:
