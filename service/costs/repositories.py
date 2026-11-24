@@ -92,6 +92,11 @@ class LlmCostRepository:
         rows = [self._to_entity(r) for r in result.scalars().all()]
         return _resolve(rows) if resolved and source is None else rows
 
+    # Rows upserted per statement. Each row is 8 bind params and asyncpg caps a
+    # statement at 32767, so one INSERT holds at most 4,095 rows — fewer than
+    # the sources return combined.
+    _UPSERT_CHUNK = 1000
+
     async def upsert_all(self, entities: list[LlmCostEntity]) -> int:
         if not entities:
             return 0
@@ -120,20 +125,23 @@ class LlmCostRepository:
             for e in deduped.values()
         ]
 
-        stmt = pg_insert(LlmCost).values(rows)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["provider", "model", "source"],
-            set_={
-                "prompt_cost_per_token": stmt.excluded.prompt_cost_per_token,
-                "completion_cost_per_token": stmt.excluded.completion_cost_per_token,
-                "price_details": stmt.excluded.price_details,
-                "is_chat_capable": stmt.excluded.is_chat_capable,
-                "updated_at": stmt.excluded.updated_at,
-            },
-        )
-        result = await self.session.execute(stmt)
+        affected = 0
+        for i in range(0, len(rows), self._UPSERT_CHUNK):
+            stmt = pg_insert(LlmCost).values(rows[i : i + self._UPSERT_CHUNK])
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["provider", "model", "source"],
+                set_={
+                    "prompt_cost_per_token": stmt.excluded.prompt_cost_per_token,
+                    "completion_cost_per_token": stmt.excluded.completion_cost_per_token,
+                    "price_details": stmt.excluded.price_details,
+                    "is_chat_capable": stmt.excluded.is_chat_capable,
+                    "updated_at": stmt.excluded.updated_at,
+                },
+            )
+            affected += (await self.session.execute(stmt)).rowcount
+        # Commit once so a refresh lands whole or not at all, as before batching.
         await self.session.commit()
-        return result.rowcount
+        return affected
 
     # Rows deleted per statement. Each key is 2 bind params; asyncpg caps a
     # statement at 32767 params and SQLite (tests) at 32766 by default.
